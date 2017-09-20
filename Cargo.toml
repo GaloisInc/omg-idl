@@ -1,0 +1,13 @@
+[package]
+name = "omg-idl"
+version = "0.1.0"
+authors = ["Adam C. Foltzer <acfoltzer@galois.com>"]
+build = "build.rs"
+
+[build-dependencies]
+lalrpop = "0.13"
+
+[dependencies]
+lalrpop-util = "0.13"
+regex = "0.2"
+lazy_static = "0.2"

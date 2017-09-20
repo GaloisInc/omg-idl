@@ -1,0 +1,170 @@
+use std::str::FromStr;
+use ast::{Id, Lit};
+use parser::utils;
+
+grammar;
+
+match {
+    r"_([a-zA-Z][a-zA-Z0-9_]+)",
+} else {
+    r"(?i)abstract" => "abstract",
+    r"(?i)any" => "any",
+    r"(?i)alias" => "alias",
+    r"(?i)attribute" => "attribute",
+    r"(?i)bitfield" => "bitfield",
+    r"(?i)bitmask" => "bitmask",
+    r"(?i)bitset" => "bitset",
+    r"(?i)boolean" => "boolean",
+    r"(?i)case" => "case",
+    r"(?i)char" => "char",
+    r"(?i)component" => "component",
+    r"(?i)connector" => "connector",
+    r"(?i)const" => "const",
+    r"(?i)consumes" => "consumes",
+    r"(?i)context" => "context",
+    r"(?i)custom" => "custom",
+    r"(?i)default" => "default",
+    r"(?i)double" => "double",
+    r"(?i)exception" => "exception",
+    r"(?i)emits" => "emits",
+    r"(?i)enum" => "enum",
+    r"(?i)eventtype" => "eventtype",
+    r"(?i)factory" => "factory",
+    r"(?i)FALSE" => "FALSE",
+    r"(?i)finder" => "finder",
+    r"(?i)fixed" => "fixed",
+    r"(?i)float" => "float",
+    r"(?i)getraises" => "getraises",
+    r"(?i)home" => "home",
+    r"(?i)import" => "import",
+    r"(?i)in" => "in",
+    r"(?i)inout" => "inout",
+    r"(?i)interface" => "interface",
+    r"(?i)local" => "local",
+    r"(?i)long" => "long",
+    r"(?i)manages" => "manages",
+    r"(?i)map" => "map",
+    r"(?i)mirrorport" => "mirrorport",
+    r"(?i)module" => "module",
+    r"(?i)multiple" => "multiple",
+    r"(?i)native" => "native",
+    r"(?i)Object" => "Object",
+    r"(?i)octet" => "octet",
+    r"(?i)oneway" => "oneway",
+    r"(?i)out" => "out",
+    r"(?i)primarykey" => "primarykey",
+    r"(?i)private" => "private",
+    r"(?i)port" => "port",
+    r"(?i)porttype" => "porttype",
+    r"(?i)provides" => "provides",
+    r"(?i)public" => "public",
+    r"(?i)publishes" => "publishes",
+    r"(?i)raises" => "raises",
+    r"(?i)readonly" => "readonly",
+    r"(?i)setraises" => "setraises",
+    r"(?i)sequence" => "sequence",
+    r"(?i)short" => "short",
+    r"(?i)string" => "string",
+    r"(?i)struct" => "struct",
+    r"(?i)supports" => "supports",
+    r"(?i)switch" => "switch",
+    r"(?i)TRUE" => "TRUE",
+    r"(?i)truncatable" => "truncatable",
+    r"(?i)typedef" => "typedef",
+    r"(?i)typeid" => "typeid",
+    r"(?i)typename" => "typename",
+    r"(?i)typeprefix" => "typeprefix",
+    r"(?i)unsigned" => "unsigned",
+    r"(?i)union" => "union",
+    r"(?i)uses" => "uses",
+    r"(?i)ValueBase" => "ValueBase",
+    r"(?i)valuetype" => "valuetype",
+    r"(?i)void" => "void",
+    r"(?i)wchar" => "wchar",
+    r"(?i)wstring" => "wstring",
+} else {
+    r"[a-zA-Z][a-zA-Z0-9_]+" => Id,
+    _
+}
+
+pub identifier: Id = {
+    Id => Id::from_str(&<>),
+    r"_([a-zA-Z][a-zA-Z0-9_]+)" => Id::from_str(&<>[1..]),
+};
+
+pub literal: Lit = {
+    integer_literal,
+    floating_pt_literal,
+    fixed_pt_literal,
+    character_literal,
+    wide_character_literal,
+    boolean_literal,
+};
+
+pub integer_literal: Lit = {
+    r"[1-9][[:digit:]]+" => Lit::Int(
+        u64::from_str_radix(&<>, 10).unwrap()
+    ),
+    r"0[[:digit:]]+" => Lit::Int(
+        u64::from_str_radix(&<>[1..], 8).unwrap()
+    ),
+    r"0x([[:xdigit:]]+)" => Lit::Int(
+        u64::from_str_radix(&<>[2..], 16).unwrap()
+    ),
+};
+
+// we don't support long doubles
+pub floating_pt_literal: Lit = {
+    // integer and fraction parts present
+    r"[[:digit:]]+\.[[:digit:]]+([eE][\-0-9][[:digit:]]*)?" => Lit::FloatPt(
+        f64::from_str(&<>).unwrap()
+    ),
+    // integer part missing
+    r"\.[[:digit:]]+([eE][\-0-9][[:digit:]]*)?" => Lit::FloatPt(
+        f64::from_str(&<>).unwrap()
+    ),
+    // fraction part missing
+    r"[[:digit:]]+\.([eE][\-0-9][[:digit:]]*)?" => Lit::FloatPt(
+        f64::from_str(&<>).unwrap()
+    ),
+    // decimal point missing, so exponent non-optional
+    r"[[:digit:]]+([eE][\-0-9][[:digit:]]*)" => Lit::FloatPt(
+        f64::from_str(&<>).unwrap()
+    ),
+};
+
+// we don't support fixed points, but can turn them into a string for
+// error reporting
+pub fixed_pt_literal: Lit = {
+    // integer and fraction parts present
+    r"[[:digit:]]+\.[[:digit:]]+[dD]" => Lit::FixedPt(
+        String::from(<>)
+    ),
+    // integer part missing
+    r"\.[[:digit:]]+[dD]" => Lit::FixedPt(
+        String::from(<>)
+    ),
+    // fraction part missing
+    r"[[:digit:]]+\.[dD]" => Lit::FixedPt(
+        String::from(<>)
+    ),
+    // decimal point missing
+    r"[[:digit:]]+[dD]" => Lit::FixedPt(
+        String::from(<>)
+    ),
+};
+
+pub character_literal: Lit = {
+    // graphical characters in ISO-8859-1 postprocessed for escape sequences
+    r"'[\PC&&[\x{00}-\x{FF}]]+'" => utils::parse_character_literal(<>)
+};
+
+pub wide_character_literal: Lit = {
+    // graphical characters postprocessed for escape sequences
+    r"L'\PC+'" => utils::parse_wide_character_literal(<>)
+};
+
+pub boolean_literal: Lit = {
+    "FALSE" => Lit::Bool(false),
+    "TRUE" => Lit::Bool(true),
+};
