@@ -62,4 +62,26 @@ mod tests {
         assert_eq!(parser::parse_wide_character_literal("L'\\u03bb'").unwrap(), ast::Lit::WChar('λ'));
     }
 
+    #[test]
+    fn boolean_literal() {
+        assert_eq!(parser::parse_boolean_literal("TRUE").unwrap(), ast::Lit::Bool(true));
+        assert_eq!(parser::parse_boolean_literal("FALSE").unwrap(), ast::Lit::Bool(false));
+        assert!(parser::parse_boolean_literal("42").is_err());
+    }
+
+    #[test]
+    fn string_literal() {
+        assert_eq!(parser::parse_string_literal("\"hello\"").unwrap(), ast::Lit::String(String::from("hello")));
+        assert_eq!(parser::parse_string_literal("\"hel\\\"lo\"").unwrap(), ast::Lit::String(String::from("hel\"lo")));
+        assert_eq!(parser::parse_string_literal("\"hello world\"").unwrap(), ast::Lit::String(String::from("hello world")));
+        assert_eq!(parser::parse_string_literal("\"hello \" \"world\"").unwrap(), ast::Lit::String(String::from("hello world")));
+    }
+
+    #[test]
+    fn wide_string_literal() {
+        assert_eq!(parser::parse_wide_string_literal("L\"hello\"").unwrap(), ast::Lit::WString(String::from("hello")));
+        assert_eq!(parser::parse_wide_string_literal("L\"hel\\\"lo\"").unwrap(), ast::Lit::WString(String::from("hel\"lo")));
+        assert_eq!(parser::parse_wide_string_literal("L\"hello \\u03bb\"").unwrap(), ast::Lit::WString(String::from("hello λ")));
+        assert_eq!(parser::parse_wide_string_literal("L\"hello \" L\"\\u03bb\"").unwrap(), ast::Lit::WString(String::from("hello λ")));
+    }
 }

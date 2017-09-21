@@ -35,6 +35,32 @@ pub fn parse_wide_character_literal(s: &str) -> Lit {
     }
 }
 
+pub fn parse_one_string_literal(s: &str) -> String {
+    println!("s={:?}", s);
+    lazy_static! {
+        static ref RE: Regex =
+            Regex::new(r#""((\\"|[\PC&&[\x{00}-\x{FF}]&&[^"]])*)""#).unwrap();
+    }
+    println!("captures={:?}", &RE.captures(s).unwrap());
+    let processed_chars = process_chars(&RE.captures(s).unwrap()[1]);
+    println!("processed_chars={:?}", processed_chars);
+    processed_chars.chars().map(|c| {
+        if c.len_utf8() > 1 {
+            panic!("wide character '{}' in string literal: \"{}\"", c, processed_chars);
+        }
+    }).count();
+    processed_chars
+}
+
+pub fn parse_one_wide_string_literal(s: &str) -> String {
+    lazy_static! {
+        static ref RE: Regex =
+            Regex::new(r#"L"((\\"|[\PC&&[^"]])*)""#).unwrap();
+    }
+    let processed_chars = process_chars(&RE.captures(s).unwrap()[1]);
+    processed_chars
+}
+
 pub fn process_chars(s: &str) -> String {
     enum State {
         Normal,
