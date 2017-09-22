@@ -1,7 +1,8 @@
 use std::str::FromStr;
-use ast::{Id, Lit};
+use ast::*;
 use parser::utils;
 
+#[LALR]
 grammar;
 
 pub identifier: Id = {
@@ -9,7 +10,64 @@ pub identifier: Id = {
     r"_([a-zA-Z][a-zA-Z0-9_]+)" => Id::from_str(&<>[1..]),
 };
 
-pub literal: Lit = {
+pub scoped_name: ScopedName = {
+    <identifier> => ScopedName::Qualified(vec![<>]),
+    "::" <identifier> => ScopedName::FileScope(vec![<>]),
+    <sn:scoped_name> "::" <id:identifier> => { let mut sn = sn; sn.push(id); sn }
+};
+
+pub const_expr: ConstExpr = {
+    <or_expr> => <>,
+};
+
+pub or_expr: ConstExpr = {
+    <xor_expr> => <>,
+    <or_expr> "|" <xor_expr> => ConstExpr::binop(ConstExpr::Or, <>),
+};
+
+pub xor_expr: ConstExpr = {
+    <and_expr> => <>,
+    <xor_expr> "^" <and_expr> => ConstExpr::binop(ConstExpr::Xor, <>),
+};
+
+pub and_expr: ConstExpr = {
+    <shift_expr> => <>,
+    <and_expr> "&" <shift_expr> => ConstExpr::binop(ConstExpr::And, <>),
+};
+
+pub shift_expr: ConstExpr = {
+    <add_expr> => <>,
+    <shift_expr> ">>" <add_expr> => ConstExpr::binop(ConstExpr::Shr, <>),
+    <shift_expr> "<<" <add_expr> => ConstExpr::binop(ConstExpr::Shl, <>),
+};
+
+pub add_expr: ConstExpr = {
+    <mult_expr> => <>,
+    <add_expr> "+" <mult_expr> => ConstExpr::binop(ConstExpr::Add, <>),
+    <add_expr> "-" <mult_expr> => ConstExpr::binop(ConstExpr::Sub, <>),
+};
+
+pub mult_expr: ConstExpr = {
+    <unary_expr> => <>,
+    <mult_expr> "*" <unary_expr> => ConstExpr::binop(ConstExpr::Mult, <>),
+    <mult_expr> "/" <unary_expr> => ConstExpr::binop(ConstExpr::Div, <>),
+    <mult_expr> "%" <unary_expr> => ConstExpr::binop(ConstExpr::Mod, <>),
+};
+
+pub unary_expr: ConstExpr = {
+    "-" <primary_expr> => ConstExpr::Negate(Box::new(<>)),
+    "+" <primary_expr> => <>,
+    "~" <primary_expr> => ConstExpr::Complement(Box::new(<>)),
+    <primary_expr> => <>,
+};
+
+pub primary_expr: ConstExpr = {
+    <scoped_name> => ConstExpr::ScopedName(<>),
+    <literal> => ConstExpr::Literal(<>),
+    "(" <const_expr> ")" => <>,
+};
+
+pub literal: Literal = {
     integer_literal,
     floating_pt_literal,
     fixed_pt_literal,
@@ -20,78 +78,78 @@ pub literal: Lit = {
     wide_string_literal,
 };
 
-pub integer_literal: Lit = {
-    r"[1-9][[:digit:]]+" => Lit::Int(
+pub integer_literal: Literal = {
+    r"[1-9][[:digit:]]*" => Literal::Int(
         u64::from_str_radix(&<>, 10).unwrap()
     ),
-    r"0[[:digit:]]+" => Lit::Int(
-        u64::from_str_radix(&<>[1..], 8).unwrap()
+    r"0[[:digit:]]*" => Literal::Int(
+        u64::from_str_radix(&<>, 8).unwrap()
     ),
-    r"0x([[:xdigit:]]+)" => Lit::Int(
+    r"0x([[:xdigit:]]+)" => Literal::Int(
         u64::from_str_radix(&<>[2..], 16).unwrap()
     ),
 };
 
 // we don't support long doubles
-pub floating_pt_literal: Lit = {
+pub floating_pt_literal: Literal = {
     // integer and fraction parts present
-    r"[[:digit:]]+\.[[:digit:]]+([eE][\-0-9][[:digit:]]*)?" => Lit::FloatPt(
+    r"[[:digit:]]+\.[[:digit:]]+([eE][\-0-9][[:digit:]]*)?" => Literal::FloatPt(
         f64::from_str(&<>).unwrap()
     ),
     // integer part missing
-    r"\.[[:digit:]]+([eE][\-0-9][[:digit:]]*)?" => Lit::FloatPt(
+    r"\.[[:digit:]]+([eE][\-0-9][[:digit:]]*)?" => Literal::FloatPt(
         f64::from_str(&<>).unwrap()
     ),
     // fraction part missing
-    r"[[:digit:]]+\.([eE][\-0-9][[:digit:]]*)?" => Lit::FloatPt(
+    r"[[:digit:]]+\.([eE][\-0-9][[:digit:]]*)?" => Literal::FloatPt(
         f64::from_str(&<>).unwrap()
     ),
     // decimal point missing, so exponent non-optional
-    r"[[:digit:]]+([eE][\-0-9][[:digit:]]*)" => Lit::FloatPt(
+    r"[[:digit:]]+([eE][\-0-9][[:digit:]]*)" => Literal::FloatPt(
         f64::from_str(&<>).unwrap()
     ),
 };
 
 // we don't support fixed points, but can turn them into a string for
 // error reporting
-pub fixed_pt_literal: Lit = {
+pub fixed_pt_literal: Literal = {
     // integer and fraction parts present
-    r"[[:digit:]]+\.[[:digit:]]+[dD]" => Lit::FixedPt(
+    r"[[:digit:]]+\.[[:digit:]]+[dD]" => Literal::FixedPt(
         String::from(<>)
     ),
     // integer part missing
-    r"\.[[:digit:]]+[dD]" => Lit::FixedPt(
+    r"\.[[:digit:]]+[dD]" => Literal::FixedPt(
         String::from(<>)
     ),
     // fraction part missing
-    r"[[:digit:]]+\.[dD]" => Lit::FixedPt(
+    r"[[:digit:]]+\.[dD]" => Literal::FixedPt(
         String::from(<>)
     ),
     // decimal point missing
-    r"[[:digit:]]+[dD]" => Lit::FixedPt(
+    r"[[:digit:]]+[dD]" => Literal::FixedPt(
         String::from(<>)
     ),
 };
 
-pub character_literal: Lit = {
+pub character_literal: Literal = {
     // graphical characters in ISO-8859-1 postprocessed for escape sequences
     r"'[\PC&&[\x{00}-\x{FF}]]+'" => utils::parse_character_literal(<>)
 };
 
-pub wide_character_literal: Lit = {
+pub wide_character_literal: Literal = {
     // graphical characters postprocessed for escape sequences
     r"L'\PC+'" => utils::parse_wide_character_literal(<>)
 };
 
-pub boolean_literal: Lit = {
-    "FALSE" => Lit::Bool(false),
-    "TRUE" => Lit::Bool(true),
+pub boolean_literal: Literal = {
+    "FALSE" => Literal::Bool(false),
+    "TRUE" => Literal::Bool(true),
 };
 
-pub string_literal: Lit = {
+pub string_literal: Literal = {
     <v:one_string_literal+> => {
         let s = v.iter().fold(String::new(), |mut acc, s| { acc.push_str(s); acc });
-        Lit::String(s)
+        Literal::String(s)
     }
 };
 
@@ -101,10 +159,10 @@ pub one_string_literal: String = {
     r#""(\\"|[\PC&&[\x{00}-\x{FF}]&&[^"]])*""# => utils::parse_one_string_literal(<>),
 };
 
-pub wide_string_literal: Lit = {
+pub wide_string_literal: Literal = {
     <v:one_wide_string_literal+> => {
         let s = v.iter().fold(String::new(), |mut acc, s| { acc.push_str(s); acc });
-        Lit::WString(s)
+        Literal::WString(s)
     }
 };
 

@@ -1,9 +1,9 @@
 use regex::Regex;
 use std::char;
 
-use ast::{Lit};
+use ast::{Literal};
 
-pub fn parse_character_literal(s: &str) -> Lit {
+pub fn parse_character_literal(s: &str) -> Literal {
     lazy_static! {
         static ref RE: Regex =
             Regex::new(r"'([\PC&&[\x{00}-\x{FF}]]+)'").unwrap();
@@ -16,12 +16,12 @@ pub fn parse_character_literal(s: &str) -> Lit {
         if c.len_utf8() > 1 {
             panic!("wide character in character literal: '{}'", c);
         } else {
-            Lit::Char(c)
+            Literal::Char(c)
         }
     }
 }
 
-pub fn parse_wide_character_literal(s: &str) -> Lit {
+pub fn parse_wide_character_literal(s: &str) -> Literal {
     lazy_static! {
         static ref RE: Regex =
             Regex::new(r"L'(\PC+)'").unwrap();
@@ -31,7 +31,7 @@ pub fn parse_wide_character_literal(s: &str) -> Lit {
         panic!("character literal with more than one character: '{}'", processed_chars);
     } else {
         let c = processed_chars.chars().next().unwrap();
-        Lit::WChar(c)
+        Literal::WChar(c)
     }
 }
 
