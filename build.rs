@@ -1,8 +1,5 @@
-extern crate lalrpop;
+extern crate peg;
 
 fn main() {
-    lalrpop::Configuration::new()
-        .log_verbose()
-        .process_current_dir()
-        .unwrap();
+    peg::cargo_build("src/parser/parser.rustpeg");
 }

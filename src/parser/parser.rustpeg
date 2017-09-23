@@ -1,0 +1,420 @@
+use std::char;
+use std::str::FromStr;
+
+use ast::*;
+
+pub identifier -> Id
+    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]+) __ { Id(id.to_owned()) }
+    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]+) __ { Id(id.to_owned()) }
+
+pub scoped_name -> ScopedName
+    = "::" ids:identifier ++ "::" { ScopedName::FileScope(ids) }
+    / ids:identifier ++ "::" { ScopedName::Qualified(ids) }
+    / id:identifier { ScopedName::Qualified(vec![id]) }
+
+pub const_dcl -> ConstDcl
+    = KEYWORD<"const"> ty:const_type id:identifier "=" __ e:const_expr {
+        ConstDcl { ty: ty, id: id, expr: e }
+      }
+
+pub const_type -> ConstType
+    = ty:integer_type { ConstType::Int(ty) }
+    / ty:floating_pt_type { ConstType::FloatPt(ty) }
+    / KEYWORD<"fixed"> { ConstType::FixedPt }
+    / KEYWORD<"char"> { ConstType::Char }
+    / KEYWORD<"wchar"> { ConstType::WChar }
+    / KEYWORD<"boolean"> { ConstType::Bool }
+    / KEYWORD<"octet"> { ConstType::Octet }
+    / string_type
+    / wide_string_type
+    / sn:scoped_name { ConstType::ScopedName(sn) }
+
+pub integer_type -> IntType
+    = signed_int
+    / unsigned_int
+
+pub signed_int -> IntType
+    = KEYWORD<"short"> { IntType::SignedShort }
+    / KEYWORD<"long"> KEYWORD<"long"> { IntType::SignedLongLong }
+    / KEYWORD<"long"> { IntType::SignedLong }
+
+pub unsigned_int -> IntType
+    = KEYWORD<"unsigned"> KEYWORD<"short"> { IntType::UnsignedShort }
+    / KEYWORD<"unsigned"> KEYWORD<"long"> KEYWORD<"long"> { IntType::UnsignedLongLong }
+    / KEYWORD<"unsigned"> KEYWORD<"long"> { IntType::UnsignedLong }
+
+pub floating_pt_type -> FloatPtType
+    = KEYWORD<"float"> { FloatPtType::Float }
+    / KEYWORD<"double"> { FloatPtType::Double }
+    / KEYWORD<"long"> KEYWORD<"double"> { FloatPtType::LongDouble }
+
+pub string_type -> ConstType
+    = KEYWORD<"string"> "<" __ e:const_expr ">" __ {
+        ConstType::String(Bound::Bounded(e))
+      }
+    / KEYWORD<"string"> {
+        ConstType::String(Bound::Unbounded)
+      }
+
+pub wide_string_type -> ConstType
+    = KEYWORD<"wstring"> "<" __ e:const_expr ">" __ {
+        ConstType::String(Bound::Bounded(e))
+      }
+    / KEYWORD<"wstring"> {
+        ConstType::String(Bound::Unbounded)
+      }
+
+pub const_expr -> ConstExpr = #infix<unary_expr> {
+    #L l ("|" __) r { ConstExpr::binop(ConstExpr::Or, l, r) }
+    #L l ("^" __) r { ConstExpr::binop(ConstExpr::Xor, l, r) }
+    #L l ("&" __) r { ConstExpr::binop(ConstExpr::And, l, r) }
+    #L l (">>" __) r { ConstExpr::binop(ConstExpr::Shr, l, r) }
+       l ("<<" __) r { ConstExpr::binop(ConstExpr::Shl, l, r) }
+    #L l ("+" __) r { ConstExpr::binop(ConstExpr::Add, l, r) }
+       l ("-" __) r { ConstExpr::binop(ConstExpr::Sub, l, r) }
+    #L l ("*" __) r { ConstExpr::binop(ConstExpr::Mult, l, r) }
+       l ("/" __) r { ConstExpr::binop(ConstExpr::Div, l, r) }
+       l ("%" __) r { ConstExpr::binop(ConstExpr::Mod, l, r) }
+}
+
+pub unary_expr -> ConstExpr
+    = "-" __ e:primary_expr { ConstExpr::Negate(Box::new(e)) }
+    / "+" __ e:primary_expr { e }
+    / "~" __ e:primary_expr { ConstExpr::Complement(Box::new(e)) }
+    / primary_expr
+
+pub primary_expr -> ConstExpr
+    = sn:scoped_name { ConstExpr::ScopedName(sn) }
+    / lit:literal { ConstExpr::Literal(lit) }
+    / "(" __ e:const_expr ")" __ { e }
+
+pub literal -> Literal
+    = floating_pt_literal
+    / fixed_pt_literal
+    / integer_literal
+    / character_literal
+    / wide_character_literal
+    / boolean_literal
+    / string_literal
+    / wide_string_literal
+    
+pub integer_literal -> Literal
+    = i:$([1-9] digit*) __ {
+        Literal::Int(u64::from_str_radix(i, 10).unwrap())
+      }
+    / "0x" i:$(hex_digit+) __ { 
+        Literal::Int(u64::from_str_radix(i, 16).unwrap())
+      }
+    / i:$("0" digit*) __ {
+        Literal::Int(u64::from_str_radix(i, 8).unwrap()) 
+      }
+
+// we don't support long doubles
+pub floating_pt_literal -> Literal
+    // integer and fraction parts present
+    = f:$(digit+ "." digit+ exponent?) __ {
+        Literal::FloatPt(f64::from_str(f).unwrap())
+      }
+    // integer part missing
+    / f:$("." digit+ exponent?) __ {
+        Literal::FloatPt(f64::from_str(f).unwrap())
+      }
+    // fraction part missing
+    / f:$(digit+ "." exponent?) __ {
+        Literal::FloatPt(f64::from_str(f).unwrap())
+      }
+    // decimal point missing, so exponent non-optional
+    / f:$(digit+ exponent) __ {
+        Literal::FloatPt(f64::from_str(f).unwrap())
+      }
+
+exponent = [eE] [\-0-9] digit*
+
+// we don't support fixed points, but can turn them into a string for
+// error reporting
+pub fixed_pt_literal -> Literal
+    // integer and fraction parts present
+    = f:$(digit+ "." digit+ [dD]) __ {
+        Literal::FixedPt(f.to_owned())
+      }
+    // integer part missing
+    / f:$("." digit+ [dD]) __ {
+        Literal::FixedPt(f.to_owned())
+      }
+    // fraction part missing
+    / f:$(digit+ "." [dD]) __ {
+        Literal::FixedPt(f.to_owned())
+      }
+    // decimal point missing
+    / f:$(digit+ [dD]) __ {
+        Literal::FixedPt(f.to_owned())
+      }
+
+pub character_literal -> Literal
+    = "'" c:character_literal_char "'" __ {
+        Literal::Char(c)
+      }
+
+pub wide_character_literal -> Literal
+    = "L'" c:wide_character_literal_char "'" __ {
+        Literal::WChar(c)
+      }
+
+character_literal_char -> char
+    = !("'" / "\\" / eol_char) c:$latin1_char { c.chars().next().unwrap() }
+    / simple_escape_char
+    / octal_escape_char
+    / hex_escape_char
+
+wide_character_literal_char -> char
+    = character_literal_char
+    / unicode_escape_char
+
+simple_escape_char -> char
+    = "\\0" { '\0' }
+    / "\\n" { '\n' }
+    / "\\t" { '\t' }
+    / "\\v" { '\x0B' }
+    / "\\b" { '\x08' }
+    / "\\r" { '\r' }
+    / "\\f" { '\x0C' }
+    / "\\a" { '\x07' }
+    / "\\\\" { '\\' }
+    / "\\?" { '?' }
+    / "\\'" { '\'' }
+    / "\\\"" { '"' }
+
+octal_escape_char -> char
+    = "\\" i:$(octal_digit*<1,3>) {
+        char::from(u8::from_str_radix(i, 8).unwrap())
+      }
+
+hex_escape_char -> char
+    = "\\x" i:$(hex_digit*<2>) {
+        char::from(u8::from_str_radix(i, 16).unwrap())
+      }
+
+unicode_escape_char -> char
+    = "\\u" i:$(hex_digit*<1,4>) {
+        char::from_u32(u32::from_str_radix(i, 16).unwrap()).unwrap()
+      }
+
+pub boolean_literal -> Literal
+    = "TRUE" __ { Literal::Bool(true) }
+    / "FALSE" __ { Literal::Bool(false) }
+
+pub string_literal -> Literal
+    = ss:one_string_literal ++ __ {
+        let s = ss.into_iter().fold(String::new(), |mut acc, s| { acc.push_str(&s); acc });
+        Literal::String(s)
+      }
+
+one_string_literal -> String
+    = "\"" v:string_literal_char* "\"" { v.into_iter().collect() }
+
+string_literal_char -> char
+    = !("\"" / "\\" / eol_char) c:$latin1_char { c.chars().next().unwrap() }
+    / simple_escape_char
+    / octal_escape_char
+    / hex_escape_char
+
+pub wide_string_literal -> Literal
+    = ss:one_wide_string_literal ++ __ {
+        let s = ss.into_iter().fold(String::new(), |mut acc, s| { acc.push_str(&s); acc });
+        Literal::WString(s)
+      }
+
+one_wide_string_literal -> String
+    = "L\"" v:wide_string_literal_char* "\"" { v.into_iter().collect() }
+
+wide_string_literal_char -> char
+    = string_literal_char
+    / unicode_escape_char
+
+latin1_char = [\x00-\xFF]
+digit = [0-9]
+octal_digit = [0-7]
+hex_digit = [0-9a-fA-F]
+
+__ = #quiet<(whitespace / eol / comment)*>
+
+/* Modeled after ECMA-262, 5th ed., 7.4. */
+comment
+  = singleLineComment
+  / multiLineComment
+
+singleLineComment
+  = "//" (!eol_char .)*
+
+multiLineComment
+  = "/*" (!"*/" .)* "*/"
+
+/* Modeled after ECMA-262, 5th ed., 7.3. */
+eol
+  = "\n"
+  / "\r\n"
+  / "\r"
+  / "\u{2028}"
+  / "\u{2029}"
+
+eol_char
+  = [\n\r\u{2028}\u{2029}]
+
+/* Modeled after ECMA-262, 5th ed., 7.2. */
+whitespace
+  = [ \t\u{00A0}\u{FEFF}\u{1680}\u{180E}\u{2000}-\u{200A}\u{202F}\u{205F}\u{3000}] // \v\f removed
+
+KEYWORD<k> = k !([a-zA-Z0-9_]) __
+keyword 
+  = KEYWORD<"abstract">
+  / KEYWORD<"any">
+  / KEYWORD<"alias">
+  / KEYWORD<"attribute">
+  / KEYWORD<"bitfield">
+  / KEYWORD<"bitmask">
+  / KEYWORD<"bitset">
+  / KEYWORD<"boolean">
+  / KEYWORD<"case">
+  / KEYWORD<"char">
+  / KEYWORD<"component">
+  / KEYWORD<"connector">
+  / KEYWORD<"const">
+  / KEYWORD<"consumes">
+  / KEYWORD<"context">
+  / KEYWORD<"custom">
+  / KEYWORD<"default">
+  / KEYWORD<"double">
+  / KEYWORD<"exception">
+  / KEYWORD<"emits">
+  / KEYWORD<"enum">
+  / KEYWORD<"eventtype">
+  / KEYWORD<"factory">
+  / KEYWORD<"FALSE">
+  / KEYWORD<"finder">
+  / KEYWORD<"fixed">
+  / KEYWORD<"float">
+  / KEYWORD<"getraises">
+  / KEYWORD<"home">
+  / KEYWORD<"import">
+  / KEYWORD<"in">
+  / KEYWORD<"inout">
+  / KEYWORD<"interface">
+  / KEYWORD<"local">
+  / KEYWORD<"long">
+  / KEYWORD<"manages">
+  / KEYWORD<"map">
+  / KEYWORD<"mirrorport">
+  / KEYWORD<"module">
+  / KEYWORD<"multiple">
+  / KEYWORD<"native">
+  / KEYWORD<"Object">
+  / KEYWORD<"octet">
+  / KEYWORD<"oneway">
+  / KEYWORD<"out">
+  / KEYWORD<"primarykey">
+  / KEYWORD<"private">
+  / KEYWORD<"port">
+  / KEYWORD<"porttype">
+  / KEYWORD<"provides">
+  / KEYWORD<"public">
+  / KEYWORD<"publishes">
+  / KEYWORD<"raises">
+  / KEYWORD<"readonly">
+  / KEYWORD<"setraises">
+  / KEYWORD<"sequence">
+  / KEYWORD<"short">
+  / KEYWORD<"string">
+  / KEYWORD<"struct">
+  / KEYWORD<"supports">
+  / KEYWORD<"switch">
+  / KEYWORD<"TRUE">
+  / KEYWORD<"truncatable">
+  / KEYWORD<"typedef">
+  / KEYWORD<"typeid">
+  / KEYWORD<"typename">
+  / KEYWORD<"typeprefix">
+  / KEYWORD<"unsigned">
+  / KEYWORD<"union">
+  / KEYWORD<"uses">
+  / KEYWORD<"ValueBase">
+  / KEYWORD<"valuetype">
+  / KEYWORD<"void">
+  / KEYWORD<"wchar">
+  / KEYWORD<"wstring">
+
+keywordi = keyword
+  / KEYWORD<"abstract"i>
+  / KEYWORD<"any"i>
+  / KEYWORD<"alias"i>
+  / KEYWORD<"attribute"i>
+  / KEYWORD<"bitfield"i>
+  / KEYWORD<"bitmask"i>
+  / KEYWORD<"bitset"i>
+  / KEYWORD<"boolean"i>
+  / KEYWORD<"case"i>
+  / KEYWORD<"char"i>
+  / KEYWORD<"component"i>
+  / KEYWORD<"connector"i>
+  / KEYWORD<"const"i>
+  / KEYWORD<"consumes"i>
+  / KEYWORD<"context"i>
+  / KEYWORD<"custom"i>
+  / KEYWORD<"default"i>
+  / KEYWORD<"double"i>
+  / KEYWORD<"exception"i>
+  / KEYWORD<"emits"i>
+  / KEYWORD<"enum"i>
+  / KEYWORD<"eventtype"i>
+  / KEYWORD<"factory"i>
+  / KEYWORD<"FALSE"i>
+  / KEYWORD<"finder"i>
+  / KEYWORD<"fixed"i>
+  / KEYWORD<"float"i>
+  / KEYWORD<"getraises"i>
+  / KEYWORD<"home"i>
+  / KEYWORD<"import"i>
+  / KEYWORD<"in"i>
+  / KEYWORD<"inout"i>
+  / KEYWORD<"interface"i>
+  / KEYWORD<"local"i>
+  / KEYWORD<"long"i>
+  / KEYWORD<"manages"i>
+  / KEYWORD<"map"i>
+  / KEYWORD<"mirrorport"i>
+  / KEYWORD<"module"i>
+  / KEYWORD<"multiple"i>
+  / KEYWORD<"native"i>
+  / KEYWORD<"Object"i>
+  / KEYWORD<"octet"i>
+  / KEYWORD<"oneway"i>
+  / KEYWORD<"out"i>
+  / KEYWORD<"primarykey"i>
+  / KEYWORD<"private"i>
+  / KEYWORD<"port"i>
+  / KEYWORD<"porttype"i>
+  / KEYWORD<"provides"i>
+  / KEYWORD<"public"i>
+  / KEYWORD<"publishes"i>
+  / KEYWORD<"raises"i>
+  / KEYWORD<"readonly"i>
+  / KEYWORD<"setraises"i>
+  / KEYWORD<"sequence"i>
+  / KEYWORD<"short"i>
+  / KEYWORD<"string"i>
+  / KEYWORD<"struct"i>
+  / KEYWORD<"supports"i>
+  / KEYWORD<"switch"i>
+  / KEYWORD<"TRUE"i>
+  / KEYWORD<"truncatable"i>
+  / KEYWORD<"typedef"i>
+  / KEYWORD<"typeid"i>
+  / KEYWORD<"typename"i>
+  / KEYWORD<"typeprefix"i>
+  / KEYWORD<"unsigned"i>
+  / KEYWORD<"union"i>
+  / KEYWORD<"uses"i>
+  / KEYWORD<"ValueBase"i>
+  / KEYWORD<"valuetype"i>
+  / KEYWORD<"void"i>
+  / KEYWORD<"wchar"i>
+  / KEYWORD<"wstring"i>

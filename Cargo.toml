@@ -5,9 +5,8 @@ authors = ["Adam C. Foltzer <acfoltzer@galois.com>"]
 build = "build.rs"
 
 [build-dependencies]
-lalrpop = "0.13"
+peg = "0.5"
 
 [dependencies]
-lalrpop-util = "0.13"
 regex = "0.2"
 lazy_static = "0.2"
