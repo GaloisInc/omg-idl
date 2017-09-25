@@ -9,6 +9,7 @@ mod tests {
 
     #[test]
     fn identifier() {
+        assert_eq!(parser::identifier("x").unwrap(), ast::identifier("x".to_owned()));
         assert_eq!(parser::identifier("foo").unwrap(), ast::identifier("foo".to_owned()));
         assert!(parser::identifier("public").is_err());
         assert_eq!(parser::identifier("_public").unwrap(), ast::identifier("public".to_owned()));

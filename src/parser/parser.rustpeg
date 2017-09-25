@@ -11,6 +11,8 @@ pub definition -> definition
     = md:module_dcl ";" __ { definition::module_dcl(md) }
     / cd:const_dcl ";" __ { definition::const_dcl(cd) }
     / td:type_dcl ";" __ { definition::type_dcl(td) }
+    / ed:except_dcl ";" __ { definition::except_dcl(ed) }
+    / id:interface_dcl ";" __ { definition::interface_dcl(id) }
 
 pub module_dcl -> module_dcl
     = KEYWORD<"module"> id:identifier "{" __ defs:definition+ "}" __ {
@@ -18,8 +20,8 @@ pub module_dcl -> module_dcl
       }
 
 pub identifier -> identifier
-    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]+) __ { ast::identifier(id.to_owned()) }
-    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]+) __ { ast::identifier(id.to_owned()) }
+    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
+    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
 
 pub scoped_name -> scoped_name
     = "::" ids:identifier ++ "::" { scoped_name::FileScope(ids) }
@@ -246,16 +248,16 @@ pub literal -> literal
     / boolean_literal
     / string_literal
     / wide_string_literal
-    
+
 pub integer_literal -> literal
     = i:$([1-9] digit*) __ {
         literal::integer_literal(u64::from_str_radix(i, 10).unwrap())
       }
-    / "0x" i:$(hex_digit+) __ { 
+    / "0x" i:$(hex_digit+) __ {
         literal::integer_literal(u64::from_str_radix(i, 16).unwrap())
       }
     / i:$("0" digit*) __ {
-        literal::integer_literal(u64::from_str_radix(i, 8).unwrap()) 
+        literal::integer_literal(u64::from_str_radix(i, 8).unwrap())
       }
 
 // we don't support long doubles
@@ -308,6 +310,103 @@ pub wide_character_literal -> literal
     = "L'" c:wide_character_literal_char "'" __ {
         literal::wide_character_literal(c)
       }
+
+pub except_dcl -> except_dcl
+    = KEYWORD<"exception"> id:identifier "{" __ ms:member* "}" __ {
+        ast::except_dcl { identifier: id, members: ms }
+      }
+
+pub interface_dcl -> interface_dcl
+    = id:interface_def { interface_dcl::interface_def(id) }
+    / interface_forward_dcl
+
+pub interface_def -> interface_def
+    = interface_kind id:identifier iis:interface_inheritance_spec? "{" __ ib:interface_body "}" __ {
+        ast::interface_def { identifier: id, interface_inheritance_spec: iis, interface_body: ib }
+      }
+
+pub interface_forward_dcl -> interface_dcl
+    = interface_kind id:identifier { interface_dcl::interface_forward_dcl(id) }
+
+interface_kind = KEYWORD<"interface">
+
+pub interface_inheritance_spec -> Vec<interface_name>
+    = ":" __ is:interface_name ++ ("," __) { is }
+
+pub interface_name -> interface_name
+    = scoped_name
+
+pub interface_body -> Vec<export>
+    = export*
+
+pub export -> export
+    = od:op_dcl ";" __ { export::op_dcl(od) }
+    / ad:attr_dcl ";" __ { export::attr_dcl(ad) }
+
+pub op_dcl -> op_dcl
+    = ots:op_type_spec id:identifier "(" __ pds:parameter_dcls ")" __ re:raises_expr? {
+        ast::op_dcl { op_type_spec: ots, identifier: id, parameter_dcls: pds, raises_expr: re }
+      }
+
+pub op_type_spec -> op_type_spec
+    = ts:type_spec { op_type_spec::type_spec(ts) }
+    / KEYWORD<"void"> { op_type_spec::void }
+
+pub parameter_dcls -> Vec<param_dcl>
+    = pds:param_dcl ** ("," __) { pds }
+
+pub param_dcl -> param_dcl
+    = pa:param_attribute ts:type_spec sd:simple_declarator {
+        ast::param_dcl { param_attribute: pa, type_spec: ts, simple_declarator: sd }
+      }
+
+pub param_attribute -> param_attribute
+    = KEYWORD<"in"> { param_attribute::in_ }
+    / KEYWORD<"out"> { param_attribute::out }
+    / KEYWORD<"inout"> { param_attribute::inout }
+
+pub raises_expr -> raises_expr
+    = KEYWORD<"raises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+
+pub attr_dcl -> attr_dcl
+    = roas:readonly_attr_spec { attr_dcl::readonly_attr_spec(roas) }
+    / attr_spec:attr_spec { attr_dcl::attr_spec(attr_spec) }
+
+pub readonly_attr_spec -> readonly_attr_spec
+    = KEYWORD<"readonly"> KEYWORD<"attribute"> ts:type_spec road:readonly_attr_declarator {
+        ast::readonly_attr_spec { type_spec: ts, readonly_attr_declarator: road }
+      }
+
+pub readonly_attr_declarator -> readonly_attr_declarator
+    = sd:simple_declarator re:raises_expr {
+        readonly_attr_declarator::simple_declarator_raises(sd, re)
+      }
+    / sds:simple_declarator ++ ("," __) {
+        readonly_attr_declarator::simple_declarators(sds)
+      }
+
+pub attr_spec -> attr_spec
+    = KEYWORD<"attribute"> ts:type_spec ad:attr_declarator {
+        ast::attr_spec { type_spec: ts, attr_declarator: ad }
+      }
+
+pub attr_declarator -> attr_declarator
+    = sd:simple_declarator are:attr_raises_expr {
+        attr_declarator::simple_declarator_raises(sd, are)
+      }
+    / sds:simple_declarator ++ ("," __) {
+        attr_declarator::simple_declarators(sds)
+      }
+
+pub attr_raises_expr -> attr_raises_expr
+    = gee:get_excep_expr see:set_excep_expr? { attr_raises_expr::get_excep_expr(gee, see) }
+    / see:set_excep_expr { attr_raises_expr::set_excep_expr(see) }
+
+pub get_excep_expr -> get_excep_expr
+    = KEYWORD<"getraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+
+pub set_excep_expr -> set_excep_expr
+    = KEYWORD<"setraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
 
 character_literal_char -> char
     = !("'" / "\\" / eol_char) c:$latin1_char { c.chars().next().unwrap() }
@@ -385,17 +484,18 @@ digit = [0-9]
 octal_digit = [0-7]
 hex_digit = [0-9a-fA-F]
 
+/* Whitespace treatment adapted from the `rust-peg` language parser itself */
 __ = #quiet<(whitespace / eol / comment)*>
 
 /* Modeled after ECMA-262, 5th ed., 7.4. */
 comment
-  = singleLineComment
-  / multiLineComment
+  = single_line_comment
+  / multi_line_comment
 
-singleLineComment
+single_line_comment
   = "//" (!eol_char .)*
 
-multiLineComment
+multi_line_comment
   = "/*" (!"*/" .)* "*/"
 
 /* Modeled after ECMA-262, 5th ed., 7.3. */
@@ -414,7 +514,7 @@ whitespace
   = [ \t\u{00A0}\u{FEFF}\u{1680}\u{180E}\u{2000}-\u{200A}\u{202F}\u{205F}\u{3000}] // \v\f removed
 
 KEYWORD<k> = k !([a-zA-Z0-9_]) __
-keyword 
+keyword
   = KEYWORD<"abstract">
   / KEYWORD<"any">
   / KEYWORD<"alias">

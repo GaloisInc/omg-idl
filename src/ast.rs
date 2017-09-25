@@ -9,6 +9,8 @@ pub enum definition {
     module_dcl(module_dcl),
     const_dcl(const_dcl),
     type_dcl(type_dcl),
+    except_dcl(except_dcl),
+    interface_dcl(interface_dcl),
 }
 
 #[derive(Debug, PartialEq)]
@@ -236,7 +238,7 @@ pub struct array_declarator {
     pub sizes: Vec<positive_int_const>,
 }
 
-type simple_declarator = identifier;
+pub type simple_declarator = identifier;
 
 // typedef_dcl + type_declarator collapsed
 #[derive(Debug, PartialEq)]
@@ -257,3 +259,102 @@ pub enum declarator {
     simple_declarator(simple_declarator),
     array_declarator(array_declarator),
 }
+
+#[derive(Debug, PartialEq)]
+pub struct except_dcl {
+    pub identifier: identifier,
+    pub members: Vec<member>,
+}
+
+// interface_dcl + interface_kind collapsed
+#[derive(Debug, PartialEq)]
+pub enum interface_dcl {
+    interface_def(interface_def),
+    interface_forward_dcl(identifier),
+}
+
+// interface_def + interface_kind + interface_header collapsed
+#[derive(Debug, PartialEq)]
+pub struct interface_def {
+    pub identifier: identifier,
+    pub interface_inheritance_spec: Option<Vec<interface_name>>,
+    pub interface_body: Vec<export>,
+}
+
+pub type interface_name = scoped_name;
+
+#[derive(Debug, PartialEq)]
+pub enum export {
+    op_dcl(op_dcl),
+    attr_dcl(attr_dcl),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct op_dcl {
+    pub op_type_spec: op_type_spec,
+    pub identifier: identifier,
+    pub parameter_dcls: Vec<param_dcl>,
+    pub raises_expr: Option<raises_expr>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum op_type_spec {
+    type_spec(type_spec),
+    void,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct param_dcl {
+    pub param_attribute: param_attribute,
+    pub type_spec: type_spec,
+    pub simple_declarator: simple_declarator,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum param_attribute {
+    in_,
+    out,
+    inout,
+}
+
+pub type raises_expr = Vec<scoped_name>;
+
+#[derive(Debug, PartialEq)]
+pub enum attr_dcl {
+    readonly_attr_spec(readonly_attr_spec),
+    attr_spec(attr_spec),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct readonly_attr_spec {
+    pub type_spec: type_spec,
+    pub readonly_attr_declarator: readonly_attr_declarator,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum readonly_attr_declarator {
+    simple_declarator_raises(simple_declarator, raises_expr),
+    simple_declarators(Vec<simple_declarator>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct attr_spec {
+    pub type_spec: type_spec,
+    pub attr_declarator: attr_declarator,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum attr_declarator {
+    simple_declarator_raises(simple_declarator, attr_raises_expr),
+    simple_declarators(Vec<simple_declarator>),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum attr_raises_expr {
+    get_excep_expr(get_excep_expr, Option<set_excep_expr>),
+    set_excep_expr(set_excep_expr),
+}
+
+pub type get_excep_expr = Vec<scoped_name>;
+
+pub type set_excep_expr = Vec<scoped_name>;
