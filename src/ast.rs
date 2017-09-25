@@ -1,128 +1,259 @@
 #[derive(Debug, PartialEq)]
-pub struct Id(pub String);
+pub struct identifier(pub String);
 
-impl Id {
-    pub fn from_str(s: &str) -> Id {
-        Id(String::from(s))
-    }
+#[derive(Debug, PartialEq)]
+pub struct specification(pub Vec<definition>);
+
+#[derive(Debug, PartialEq)]
+pub enum definition {
+    module_dcl(module_dcl),
+    const_dcl(const_dcl),
+    type_dcl(type_dcl),
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ScopedName {
-    Qualified(Vec<Id>),
-    FileScope(Vec<Id>),
+pub struct module_dcl {
+    pub identifier: identifier,
+    pub defs: Vec<definition>,
 }
 
-impl ScopedName {
-    pub fn push(&mut self, id: Id) {
+#[derive(Debug, PartialEq)]
+pub enum scoped_name {
+    Qualified(Vec<identifier>),
+    FileScope(Vec<identifier>),
+}
+
+impl scoped_name {
+    pub fn push(&mut self, id: identifier) {
         match *self {
-            ScopedName::Qualified(ref mut ids) => ids.push(id),
-            ScopedName::FileScope(ref mut ids) => ids.push(id),
+            scoped_name::Qualified(ref mut ids) => ids.push(id),
+            scoped_name::FileScope(ref mut ids) => ids.push(id),
         };
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct ConstDcl {
-    pub ty: ConstType,
-    pub id: Id,
-    pub expr: ConstExpr,
+pub struct const_dcl {
+    pub ty: const_type,
+    pub identifier: identifier,
+    pub expr: const_expr,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ConstType {
-    Int(IntType),
-    FloatPt(FloatPtType),
+pub enum const_type {
+    integer_type(integer_type),
+    floating_pt_type(floating_pt_type),
+    char_type,
+    wide_char_type,
+    boolean_type,
+    octet_type,
+    string_type(Bound),
+    wide_string_type(Bound),
+    scoped_name(scoped_name),
     // unsupported
-    FixedPt,
-    Char,
-    WChar,
-    Bool,
-    Octet,
-    String(Bound),
-    WString(Bound),
-    ScopedName(ScopedName),
+    fixed_pt_const_type,
 }
 
+// Covers all of the const_expr non-terminals in order to better fit
+// the `peg` style of parsing:
+//
+// const_expr, or_expr, xor_expr, and_expr, shift_expr, add_expr,
+// mult_expr, unary_expr, unary_operator, primary_expr
 #[derive(Debug, PartialEq)]
-pub enum Bound {
-    Bounded(ConstExpr),
-    Unbounded,
+pub enum const_expr {
+    scoped_name(scoped_name),
+    literal(literal),
+    Or(Box<const_expr>, Box<const_expr>),
+    Xor(Box<const_expr>, Box<const_expr>),
+    And(Box<const_expr>, Box<const_expr>),
+    Shr(Box<const_expr>, Box<const_expr>),
+    Shl(Box<const_expr>, Box<const_expr>),
+    Add(Box<const_expr>, Box<const_expr>),
+    Sub(Box<const_expr>, Box<const_expr>),
+    Mult(Box<const_expr>, Box<const_expr>),
+    Div(Box<const_expr>, Box<const_expr>),
+    Mod(Box<const_expr>, Box<const_expr>),
+    Negate(Box<const_expr>),
+    Complement(Box<const_expr>),
 }
 
-#[derive(Debug, PartialEq)]
-pub enum IntType {
-    SignedShort,
-    SignedLong,
-    SignedLongLong,
-    UnsignedShort,
-    UnsignedLong,
-    UnsignedLongLong,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum FloatPtType {
-    Float,
-    Double,
-    // unsupported
-    LongDouble,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum TypeDcl {
-    Constr(ConstrTypeDcl),
-    Native(Id),
-    Typedef(TypedefDecl),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum ConstrTypeDcl {
-    StructDef(StructDef),
-    StructFwd(Id),
-    UnionDef(UnionDef),
-    UnionFwd(id),
-    Enum(EnumDcl),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct StructDef {
-    pub id: Id,
-    pub members: Vec<Member>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum ConstExpr {
-    ScopedName(ScopedName),
-    Literal(Literal),
-    Or(Box<ConstExpr>, Box<ConstExpr>),
-    Xor(Box<ConstExpr>, Box<ConstExpr>),
-    And(Box<ConstExpr>, Box<ConstExpr>),
-    Shr(Box<ConstExpr>, Box<ConstExpr>),
-    Shl(Box<ConstExpr>, Box<ConstExpr>),
-    Add(Box<ConstExpr>, Box<ConstExpr>),
-    Sub(Box<ConstExpr>, Box<ConstExpr>),
-    Mult(Box<ConstExpr>, Box<ConstExpr>),
-    Div(Box<ConstExpr>, Box<ConstExpr>),
-    Mod(Box<ConstExpr>, Box<ConstExpr>),
-    Negate(Box<ConstExpr>),
-    Complement(Box<ConstExpr>),
-}
-
-impl ConstExpr {
-    pub fn binop<F>(ctor: F, l: ConstExpr, r: ConstExpr) -> ConstExpr
-        where F: FnOnce(Box<ConstExpr>, Box<ConstExpr>) -> ConstExpr {
+impl const_expr {
+    pub fn binop<F>(ctor: F, l: const_expr, r: const_expr) -> const_expr
+        where F: FnOnce(Box<const_expr>, Box<const_expr>) -> const_expr {
         ctor(Box::new(l), Box::new(r))
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Literal {
-    Int(u64),
-    FloatPt(f64),
-    FixedPt(String),
-    Char(char),
-    WChar(char),
-    Bool(bool),
-    String(String),
-    WString(String),
+pub enum literal {
+    integer_literal(u64),
+    floating_pt_literal(f64),
+    fixed_pt_literal(String),
+    character_literal(char),
+    wide_character_literal(char),
+    boolean_literal(bool),
+    string_literal(String),
+    wide_string_literal(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct positive_int_const(pub const_expr);
+
+#[derive(Debug, PartialEq)]
+pub enum type_dcl {
+    constr_type_dcl(constr_type_dcl),
+    native_dcl(simple_declarator),
+    typedef_dcl(typedef_dcl),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum type_spec {
+    simple_type_spec(simple_type_spec),
+    template_type_spec(template_type_spec),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum simple_type_spec {
+    base_type_spec(base_type_spec),
+    scoped_name(scoped_name),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum base_type_spec {
+    integer_type(integer_type),
+    floating_pt_type(floating_pt_type),
+    char_type,
+    wide_char_type,
+    boolean_type,
+    octet_type,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Bound {
+    Bounded(positive_int_const),
+    Unbounded,
+}
+
+// collapsed
+#[derive(Debug, PartialEq)]
+pub enum integer_type {
+    signed_short_int,
+    signed_long_int,
+    signed_longlong_int,
+    unsigned_short_int,
+    unsigned_long_int,
+    unsigned_longlong_int,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum floating_pt_type {
+    float,
+    double,
+    // unsupported
+    long_double,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum template_type_spec {
+    // break recursion with a Box here
+    sequence_type(Box<type_spec>, Bound),
+    string_type(Bound),
+    wide_string_type(Bound),
+    // unsupported
+    fixed_pt_type,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum constr_type_dcl {
+    struct_dcl(struct_dcl),
+    union_dcl(union_dcl),
+    enum_dcl(enum_dcl),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum struct_dcl {
+    struct_def(struct_def),
+    struct_forward_dcl(identifier),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct struct_def {
+    pub identifier: identifier,
+    pub members: Vec<member>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct member {
+    pub type_spec: type_spec,
+    pub declarators: Vec<declarator>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum union_dcl {
+    union_def(union_def),
+    union_forward_dcl(identifier),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct union_def {
+    pub identifier: identifier,
+    pub switch_type_spec: switch_type_spec,
+    pub switch_body: Vec<case>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum switch_type_spec {
+    integer_type(integer_type),
+    char_type,
+    boolean_type,
+    scoped_name(scoped_name),
+}
+
+// case + element_spec collapsed
+#[derive(Debug, PartialEq)]
+pub struct case {
+    pub case_labels: Vec<case_label>,
+    pub type_spec: type_spec,
+    pub declarator: declarator,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum case_label {
+    const_expr(const_expr),
+    default,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct enum_dcl {
+    pub identifier: identifier,
+    pub enumerators: Vec<identifier>,
+}
+
+// array_declarator + fixed_array_size collapsed
+#[derive(Debug, PartialEq)]
+pub struct array_declarator {
+    pub identifier: identifier,
+    pub sizes: Vec<positive_int_const>,
+}
+
+type simple_declarator = identifier;
+
+// typedef_dcl + type_declarator collapsed
+#[derive(Debug, PartialEq)]
+pub enum typedef_dcl {
+    simple_type_spec(simple_type_spec, Vec<any_declarator>),
+    template_type_spec(template_type_spec, Vec<any_declarator>),
+    constr_type_dcl(constr_type_dcl, Vec<any_declarator>),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum any_declarator {
+    simple_declarator(simple_declarator),
+    array_declarator(array_declarator),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum declarator {
+    simple_declarator(simple_declarator),
+    array_declarator(array_declarator),
 }

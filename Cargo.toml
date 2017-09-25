@@ -1,5 +1,5 @@
 [package]
-name = "omg-idl"
+name = "omg_idl"
 version = "0.1.0"
 authors = ["Adam C. Foltzer <acfoltzer@galois.com>"]
 build = "build.rs"
@@ -8,5 +8,3 @@ build = "build.rs"
 peg = "0.5"
 
 [dependencies]
-regex = "0.2"
-lazy_static = "0.2"
