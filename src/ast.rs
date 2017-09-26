@@ -200,7 +200,7 @@ pub enum union_dcl {
 pub struct union_def {
     pub identifier: identifier,
     pub switch_type_spec: switch_type_spec,
-    pub switch_body: Vec<case>,
+    pub switch_body: switch_body,
 }
 
 #[derive(Debug, PartialEq)]
@@ -210,6 +210,8 @@ pub enum switch_type_spec {
     boolean_type,
     scoped_name(scoped_name),
 }
+
+pub type switch_body = Vec<case>;
 
 // case + element_spec collapsed
 #[derive(Debug, PartialEq)]

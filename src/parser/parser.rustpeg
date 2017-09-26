@@ -4,24 +4,22 @@ use std::str::FromStr;
 use ast;
 use ast::*;
 
+/* Productions from IDL Building Blocks Core Data Types, Interfaces - Basic, and Anonymous Types */
+
 pub specification -> specification
     = defs:definition+ { ast::specification(defs) }
 
-pub definition -> definition
+definition -> definition
     = md:module_dcl ";" __ { definition::module_dcl(md) }
     / cd:const_dcl ";" __ { definition::const_dcl(cd) }
     / td:type_dcl ";" __ { definition::type_dcl(td) }
     / ed:except_dcl ";" __ { definition::except_dcl(ed) }
     / id:interface_dcl ";" __ { definition::interface_dcl(id) }
 
-pub module_dcl -> module_dcl
+module_dcl -> module_dcl
     = KEYWORD<"module"> id:identifier "{" __ defs:definition+ "}" __ {
         ast::module_dcl { identifier: id, defs: defs }
       }
-
-pub identifier -> identifier
-    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
-    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
 
 pub scoped_name -> scoped_name
     = "::" ids:identifier ++ "::" { scoped_name::FileScope(ids) }
@@ -33,187 +31,17 @@ pub const_dcl -> const_dcl
         ast::const_dcl { ty: ty, identifier: id, expr: e }
       }
 
-pub const_type -> const_type
+const_type -> const_type
     = ty:integer_type { const_type::integer_type(ty) }
     / ty:floating_pt_type { const_type::floating_pt_type(ty) }
-    / KEYWORD<"fixed"> { const_type::fixed_pt_const_type }
+    / fixed_pt_const_type { const_type::fixed_pt_const_type }
     / char_type { const_type::char_type }
-    / KEYWORD<"wchar"> { const_type::wide_char_type }
+    / wide_char_type { const_type::wide_char_type }
     / boolean_type { const_type::boolean_type }
-    / KEYWORD<"octet"> { const_type::octet_type }
+    / octet_type { const_type::octet_type }
     / b:string_type { const_type::string_type(b) }
     / b:wide_string_type { const_type::wide_string_type(b) }
     / sn:scoped_name { const_type::scoped_name(sn) }
-
-pub integer_type -> integer_type
-    = signed_int
-    / unsigned_int
-
-pub signed_int -> integer_type
-    = KEYWORD<"short"> { integer_type::signed_short_int }
-    / KEYWORD<"long"> KEYWORD<"long"> { integer_type::signed_longlong_int }
-    / KEYWORD<"long"> { integer_type::signed_long_int }
-
-pub unsigned_int -> integer_type
-    = KEYWORD<"unsigned"> KEYWORD<"short"> { integer_type::unsigned_short_int }
-    / KEYWORD<"unsigned"> KEYWORD<"long"> KEYWORD<"long"> { integer_type::unsigned_longlong_int }
-    / KEYWORD<"unsigned"> KEYWORD<"long"> { integer_type::unsigned_long_int }
-
-pub floating_pt_type -> floating_pt_type
-    = KEYWORD<"float"> { floating_pt_type::float }
-    / KEYWORD<"double"> { floating_pt_type::double }
-    / KEYWORD<"long"> KEYWORD<"double"> { floating_pt_type::long_double }
-
-pub string_type -> Bound
-    = KEYWORD<"string"> "<" __ p:positive_int_const ">" __ { Bound::Bounded(p) }
-    / KEYWORD<"string"> { Bound::Unbounded }
-
-pub wide_string_type -> Bound
-    = KEYWORD<"wstring"> "<" __ p:positive_int_const ">" __ { Bound::Bounded(p) }
-    / KEYWORD<"wstring"> { Bound::Unbounded }
-
-pub sequence_type -> (type_spec, Bound)
-    = KEYWORD<"sequence"> "<" __ ts:type_spec "," __ p:positive_int_const ">" __ {
-        (ts, Bound::Bounded(p))
-      }
-    / KEYWORD<"sequence"> "<" __ ts:type_spec ">" __ {
-        (ts, Bound::Unbounded)
-      }
-
-pub positive_int_const -> positive_int_const
-    = e:const_expr { ast::positive_int_const(e) }
-
-pub base_type_spec -> base_type_spec
-    = ty:integer_type { base_type_spec::integer_type(ty) }
-    / ty:floating_pt_type { base_type_spec::floating_pt_type(ty) }
-    / char_type { base_type_spec::char_type }
-    / KEYWORD<"wchar"> { base_type_spec::wide_char_type }
-    / boolean_type { base_type_spec::boolean_type }
-    / KEYWORD<"octet"> { base_type_spec::octet_type }
-
-pub type_dcl -> type_dcl
-    = c:constr_type_dcl { type_dcl::constr_type_dcl(c) }
-    / KEYWORD<"native"> id:identifier { type_dcl::native_dcl(id) }
-    / td:typedef_dcl { type_dcl::typedef_dcl(td) }
-
-pub constr_type_dcl -> constr_type_dcl
-    = sd:struct_dcl { constr_type_dcl::struct_dcl(sd) }
-    / ud:union_dcl { constr_type_dcl::union_dcl(ud) }
-    / ed:enum_dcl { constr_type_dcl::enum_dcl(ed) }
-
-pub struct_dcl -> struct_dcl
-    = sd:struct_def { struct_dcl::struct_def(sd) }
-    / struct_forward_dcl
-
-pub struct_forward_dcl -> struct_dcl
-    = KEYWORD<"struct"> id:identifier { struct_dcl::struct_forward_dcl(id) }
-
-pub union_dcl -> union_dcl
-    = ud:union_def { union_dcl::union_def(ud) }
-    / union_forward_dcl
-
-pub union_forward_dcl -> union_dcl
-    = KEYWORD<"union"> id:identifier { union_dcl::union_forward_dcl(id) }
-
-pub struct_def -> struct_def
-    = KEYWORD<"struct"> id:identifier "{" __ ms:member+ "}" __ {
-        ast::struct_def { identifier: id, members: ms }
-      }
-
-pub member -> member
-    = t:type_spec ds:declarators ";" __ { ast::member { type_spec: t, declarators: ds } }
-
-pub union_def -> union_def
-    = KEYWORD<"union"> id:identifier KEYWORD<"switch"> "(" __ sty:switch_type_spec ")" __
-        "{" __ sb:switch_body "}" __
-      { ast::union_def { identifier: id, switch_type_spec: sty, switch_body: sb } }
-
-pub switch_type_spec -> switch_type_spec
-    = i:integer_type { switch_type_spec::integer_type(i) }
-    / char_type { switch_type_spec::char_type }
-    / boolean_type { switch_type_spec::boolean_type }
-    / sn:scoped_name { switch_type_spec::scoped_name(sn) }
-
-pub switch_body -> Vec<case>
-    = case+
-
-pub case -> case
-    = ls:case_label+ el:element_spec ";" __ {
-        let (t, d) = el; ast::case { case_labels: ls, type_spec: t, declarator: d }
-      }
-
-pub case_label -> case_label
-    = KEYWORD<"case"> e:const_expr ":" __ { case_label::const_expr(e) }
-    / KEYWORD<"default"> ":" __ { case_label::default }
-
-pub element_spec -> (type_spec, declarator)
-    = ty:type_spec d:declarator { (ty, d) }
-
-pub enum_dcl -> enum_dcl
-    = KEYWORD<"enum"> id:identifier "{" __ es:enumerator ++ ("," __) "}" __ {
-        ast::enum_dcl { identifier: id, enumerators: es }
-      }
-
-pub enumerator -> identifier
-    = identifier
-
-char_type = KEYWORD<"char">
-boolean_type = KEYWORD<"boolean">
-
-pub declarators -> Vec<declarator>
-    = declarator ++ ("," __)
-
-pub declarator -> declarator
-    = ad:array_declarator { declarator::array_declarator(ad) }
-    / sd:simple_declarator { declarator::simple_declarator(sd) }
-
-pub simple_declarator -> identifier
-    = identifier
-
-pub type_spec -> type_spec
-    = st:simple_type_spec { type_spec::simple_type_spec(st) }
-    / tt:template_type_spec { type_spec::template_type_spec(tt) }
-
-pub typedef_dcl -> typedef_dcl
-    = KEYWORD<"typedef"> td:type_declarator { td }
-
-pub type_declarator -> typedef_dcl
-    = st:simple_type_spec ads:any_declarators {
-        typedef_dcl::simple_type_spec(st, ads)
-      }
-    / tt:template_type_spec ads:any_declarators {
-        typedef_dcl::template_type_spec(tt, ads)
-      }
-    / ct:constr_type_dcl ads:any_declarators {
-        typedef_dcl::constr_type_dcl(ct, ads)
-      }
-
-pub any_declarators -> Vec<any_declarator>
-    = any_declarator ++ ("," __)
-
-pub any_declarator -> any_declarator
-    = sd:simple_declarator { any_declarator::simple_declarator(sd) }
-    / ad:array_declarator { any_declarator::array_declarator(ad) }
-
-pub array_declarator -> array_declarator
-    = id:identifier szs:fixed_array_size+ { array_declarator { identifier: id, sizes: szs } }
-
-pub fixed_array_size -> positive_int_const
-    = "[" __ p:positive_int_const "]" __ { p }
-
-pub simple_type_spec -> simple_type_spec
-    = bt:base_type_spec { simple_type_spec::base_type_spec(bt) }
-    / sn:scoped_name { simple_type_spec::scoped_name(sn) }
-
-pub template_type_spec -> template_type_spec
-    = seq:sequence_type { let (ts, b) = seq; template_type_spec::sequence_type(Box::new(ts), b) }
-    / b:string_type { template_type_spec::string_type(b) }
-    / b:wide_string_type { template_type_spec::wide_string_type(b) }
-    / fixed_pt_type { template_type_spec::fixed_pt_type }
-
-// unsupported; just here to match
-pub fixed_pt_type -> ()
-    = KEYWORD<"fixed"> "<" __ const_expr "," __ const_expr ">" __ { () }
 
 pub const_expr -> const_expr = #infix<unary_expr> {
     #L l ("|" __) r { const_expr::binop(const_expr::Or, l, r) }
@@ -228,18 +56,18 @@ pub const_expr -> const_expr = #infix<unary_expr> {
        l ("%" __) r { const_expr::binop(const_expr::Mod, l, r) }
 }
 
-pub unary_expr -> const_expr
+unary_expr -> const_expr
     = "-" __ e:primary_expr { const_expr::Negate(Box::new(e)) }
     / "+" __ e:primary_expr { e }
     / "~" __ e:primary_expr { const_expr::Complement(Box::new(e)) }
     / primary_expr
 
-pub primary_expr -> const_expr
+primary_expr -> const_expr
     = sn:scoped_name { const_expr::scoped_name(sn) }
     / lit:literal { const_expr::literal(lit) }
     / "(" __ e:const_expr ")" __ { e }
 
-pub literal -> literal
+literal -> literal
     = floating_pt_literal
     / fixed_pt_literal
     / integer_literal
@@ -248,6 +76,291 @@ pub literal -> literal
     / boolean_literal
     / string_literal
     / wide_string_literal
+
+pub boolean_literal -> literal
+    = "TRUE" __ { literal::boolean_literal(true) }
+    / "FALSE" __ { literal::boolean_literal(false) }
+
+positive_int_const -> positive_int_const
+    = e:const_expr { ast::positive_int_const(e) }
+
+pub type_dcl -> type_dcl
+    = ctd:constr_type_dcl { type_dcl::constr_type_dcl(ctd) }
+    / nd:native_dcl { type_dcl::native_dcl(nd) }
+    / td:typedef_dcl { type_dcl::typedef_dcl(td) }
+
+type_spec -> type_spec
+    = st:simple_type_spec { type_spec::simple_type_spec(st) }
+    / tt:template_type_spec { type_spec::template_type_spec(tt) }
+
+simple_type_spec -> simple_type_spec
+    = bt:base_type_spec { simple_type_spec::base_type_spec(bt) }
+    / sn:scoped_name { simple_type_spec::scoped_name(sn) }
+
+pub base_type_spec -> base_type_spec
+    = ty:integer_type { base_type_spec::integer_type(ty) }
+    / ty:floating_pt_type { base_type_spec::floating_pt_type(ty) }
+    / char_type { base_type_spec::char_type }
+    / wide_char_type { base_type_spec::wide_char_type }
+    / boolean_type { base_type_spec::boolean_type }
+    / octet_type { base_type_spec::octet_type }
+
+floating_pt_type -> floating_pt_type
+    = KEYWORD<"float"> { floating_pt_type::float }
+    / KEYWORD<"double"> { floating_pt_type::double }
+    / KEYWORD<"long"> KEYWORD<"double"> { floating_pt_type::long_double }
+
+integer_type -> integer_type
+    = signed_int
+    / unsigned_int
+
+signed_int -> integer_type
+    = KEYWORD<"short"> { integer_type::signed_short_int }
+    / KEYWORD<"long"> KEYWORD<"long"> { integer_type::signed_longlong_int }
+    / KEYWORD<"long"> { integer_type::signed_long_int }
+
+unsigned_int -> integer_type
+    = KEYWORD<"unsigned"> KEYWORD<"short"> { integer_type::unsigned_short_int }
+    / KEYWORD<"unsigned"> KEYWORD<"long"> KEYWORD<"long"> { integer_type::unsigned_longlong_int }
+    / KEYWORD<"unsigned"> KEYWORD<"long"> { integer_type::unsigned_long_int }
+
+char_type = KEYWORD<"char">
+
+wide_char_type = KEYWORD<"wchar">
+
+boolean_type = KEYWORD<"boolean">
+
+octet_type = KEYWORD<"octet">
+
+template_type_spec -> template_type_spec
+    = seq:sequence_type { let (ts, b) = seq; template_type_spec::sequence_type(Box::new(ts), b) }
+    / b:string_type { template_type_spec::string_type(b) }
+    / b:wide_string_type { template_type_spec::wide_string_type(b) }
+    / fixed_pt_type { template_type_spec::fixed_pt_type }
+
+sequence_type -> (type_spec, Bound)
+    = KEYWORD<"sequence"> "<" __ ts:type_spec "," __ p:positive_int_const ">" __ {
+        (ts, Bound::Bounded(p))
+      }
+    / KEYWORD<"sequence"> "<" __ ts:type_spec ">" __ {
+        (ts, Bound::Unbounded)
+      }
+
+string_type -> Bound
+    = KEYWORD<"string"> "<" __ p:positive_int_const ">" __ { Bound::Bounded(p) }
+    / KEYWORD<"string"> { Bound::Unbounded }
+
+wide_string_type -> Bound
+    = KEYWORD<"wstring"> "<" __ p:positive_int_const ">" __ { Bound::Bounded(p) }
+    / KEYWORD<"wstring"> { Bound::Unbounded }
+
+// unsupported; just here to match
+fixed_pt_type -> ()
+    = KEYWORD<"fixed"> "<" __ const_expr "," __ const_expr ">" __ { () }
+
+fixed_pt_const_type = KEYWORD<"fixed">
+
+constr_type_dcl -> constr_type_dcl
+    = sd:struct_dcl { constr_type_dcl::struct_dcl(sd) }
+    / ud:union_dcl { constr_type_dcl::union_dcl(ud) }
+    / ed:enum_dcl { constr_type_dcl::enum_dcl(ed) }
+
+struct_dcl -> struct_dcl
+    = sd:struct_def { struct_dcl::struct_def(sd) }
+    / struct_forward_dcl
+
+struct_def -> struct_def
+    = KEYWORD<"struct"> id:identifier "{" __ ms:member+ "}" __ {
+        ast::struct_def { identifier: id, members: ms }
+      }
+
+member -> member
+    = t:type_spec ds:declarators ";" __ { ast::member { type_spec: t, declarators: ds } }
+
+struct_forward_dcl -> struct_dcl
+    = KEYWORD<"struct"> id:identifier { struct_dcl::struct_forward_dcl(id) }
+
+union_dcl -> union_dcl
+    = ud:union_def { union_dcl::union_def(ud) }
+    / union_forward_dcl
+
+union_def -> union_def
+    = KEYWORD<"union"> id:identifier KEYWORD<"switch"> "(" __ sty:switch_type_spec ")" __
+        "{" __ sb:switch_body "}" __
+      { ast::union_def { identifier: id, switch_type_spec: sty, switch_body: sb } }
+
+switch_type_spec -> switch_type_spec
+    = i:integer_type { switch_type_spec::integer_type(i) }
+    / char_type { switch_type_spec::char_type }
+    / boolean_type { switch_type_spec::boolean_type }
+    / sn:scoped_name { switch_type_spec::scoped_name(sn) }
+
+switch_body -> switch_body
+    = case+
+
+case -> case
+    = ls:case_label+ el:element_spec ";" __ {
+        let (t, d) = el; ast::case { case_labels: ls, type_spec: t, declarator: d }
+      }
+
+case_label -> case_label
+    = KEYWORD<"case"> e:const_expr ":" __ { case_label::const_expr(e) }
+    / KEYWORD<"default"> ":" __ { case_label::default }
+
+element_spec -> (type_spec, declarator)
+    = ty:type_spec d:declarator { (ty, d) }
+
+union_forward_dcl -> union_dcl
+    = KEYWORD<"union"> id:identifier { union_dcl::union_forward_dcl(id) }
+
+enum_dcl -> enum_dcl
+    = KEYWORD<"enum"> id:identifier "{" __ es:enumerator ++ ("," __) "}" __ {
+        ast::enum_dcl { identifier: id, enumerators: es }
+      }
+
+enumerator -> identifier
+    = identifier
+
+array_declarator -> array_declarator
+    = id:identifier szs:fixed_array_size+ { array_declarator { identifier: id, sizes: szs } }
+
+fixed_array_size -> positive_int_const
+    = "[" __ p:positive_int_const "]" __ { p }
+
+native_dcl -> identifier
+    = KEYWORD<"native"> id:identifier { id }
+
+simple_declarator -> identifier
+    = identifier
+
+typedef_dcl -> typedef_dcl
+    = KEYWORD<"typedef"> td:type_declarator { td }
+
+type_declarator -> typedef_dcl
+    = st:simple_type_spec ads:any_declarators {
+        typedef_dcl::simple_type_spec(st, ads)
+      }
+    / tt:template_type_spec ads:any_declarators {
+        typedef_dcl::template_type_spec(tt, ads)
+      }
+    / ct:constr_type_dcl ads:any_declarators {
+        typedef_dcl::constr_type_dcl(ct, ads)
+      }
+
+any_declarators -> Vec<any_declarator>
+    = any_declarator ++ ("," __)
+
+any_declarator -> any_declarator
+    = sd:simple_declarator { any_declarator::simple_declarator(sd) }
+    / ad:array_declarator { any_declarator::array_declarator(ad) }
+
+declarators -> Vec<declarator>
+    = declarator ++ ("," __)
+
+declarator -> declarator
+    = ad:array_declarator { declarator::array_declarator(ad) }
+    / sd:simple_declarator { declarator::simple_declarator(sd) }
+
+/* Building Block Interfaces - Basic */
+
+except_dcl -> except_dcl
+    = KEYWORD<"exception"> id:identifier "{" __ ms:member* "}" __ {
+        ast::except_dcl { identifier: id, members: ms }
+      }
+
+interface_dcl -> interface_dcl
+    = id:interface_def { interface_dcl::interface_def(id) }
+    / interface_forward_dcl
+
+interface_def -> interface_def
+    = interface_kind id:identifier iis:interface_inheritance_spec? "{" __ ib:interface_body "}" __ {
+        ast::interface_def { identifier: id, interface_inheritance_spec: iis, interface_body: ib }
+      }
+
+interface_forward_dcl -> interface_dcl
+    = interface_kind id:identifier { interface_dcl::interface_forward_dcl(id) }
+
+interface_kind = KEYWORD<"interface">
+
+interface_inheritance_spec -> Vec<interface_name>
+    = ":" __ is:interface_name ++ ("," __) { is }
+
+interface_name -> interface_name
+    = scoped_name
+
+interface_body -> Vec<export>
+    = export*
+
+export -> export
+    = od:op_dcl ";" __ { export::op_dcl(od) }
+    / ad:attr_dcl ";" __ { export::attr_dcl(ad) }
+
+op_dcl -> op_dcl
+    = ots:op_type_spec id:identifier "(" __ pds:parameter_dcls ")" __ re:raises_expr? {
+        ast::op_dcl { op_type_spec: ots, identifier: id, parameter_dcls: pds, raises_expr: re }
+      }
+
+op_type_spec -> op_type_spec
+    = ts:type_spec { op_type_spec::type_spec(ts) }
+    / KEYWORD<"void"> { op_type_spec::void }
+
+parameter_dcls -> Vec<param_dcl>
+    = pds:param_dcl ** ("," __) { pds }
+
+param_dcl -> param_dcl
+    = pa:param_attribute ts:type_spec sd:simple_declarator {
+        ast::param_dcl { param_attribute: pa, type_spec: ts, simple_declarator: sd }
+      }
+
+param_attribute -> param_attribute
+    = KEYWORD<"in"> { param_attribute::in_ }
+    / KEYWORD<"out"> { param_attribute::out }
+    / KEYWORD<"inout"> { param_attribute::inout }
+
+raises_expr -> raises_expr
+    = KEYWORD<"raises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+
+attr_dcl -> attr_dcl
+    = roas:readonly_attr_spec { attr_dcl::readonly_attr_spec(roas) }
+    / attr_spec:attr_spec { attr_dcl::attr_spec(attr_spec) }
+
+readonly_attr_spec -> readonly_attr_spec
+    = KEYWORD<"readonly"> KEYWORD<"attribute"> ts:type_spec road:readonly_attr_declarator {
+        ast::readonly_attr_spec { type_spec: ts, readonly_attr_declarator: road }
+      }
+
+readonly_attr_declarator -> readonly_attr_declarator
+    = sd:simple_declarator re:raises_expr {
+        readonly_attr_declarator::simple_declarator_raises(sd, re)
+      }
+    / sds:simple_declarator ++ ("," __) {
+        readonly_attr_declarator::simple_declarators(sds)
+      }
+
+attr_spec -> attr_spec
+    = KEYWORD<"attribute"> ts:type_spec ad:attr_declarator {
+        ast::attr_spec { type_spec: ts, attr_declarator: ad }
+      }
+
+attr_declarator -> attr_declarator
+    = sd:simple_declarator are:attr_raises_expr {
+        attr_declarator::simple_declarator_raises(sd, are)
+      }
+    / sds:simple_declarator ++ ("," __) {
+        attr_declarator::simple_declarators(sds)
+      }
+
+attr_raises_expr -> attr_raises_expr
+    = gee:get_excep_expr see:set_excep_expr? { attr_raises_expr::get_excep_expr(gee, see) }
+    / see:set_excep_expr { attr_raises_expr::set_excep_expr(see) }
+
+get_excep_expr -> get_excep_expr
+    = KEYWORD<"getraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+
+set_excep_expr -> set_excep_expr
+    = KEYWORD<"setraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+
+/* Rules derived from 7.2 Lexical Conventions */
 
 pub integer_literal -> literal
     = i:$([1-9] digit*) __ {
@@ -311,102 +424,9 @@ pub wide_character_literal -> literal
         literal::wide_character_literal(c)
       }
 
-pub except_dcl -> except_dcl
-    = KEYWORD<"exception"> id:identifier "{" __ ms:member* "}" __ {
-        ast::except_dcl { identifier: id, members: ms }
-      }
-
-pub interface_dcl -> interface_dcl
-    = id:interface_def { interface_dcl::interface_def(id) }
-    / interface_forward_dcl
-
-pub interface_def -> interface_def
-    = interface_kind id:identifier iis:interface_inheritance_spec? "{" __ ib:interface_body "}" __ {
-        ast::interface_def { identifier: id, interface_inheritance_spec: iis, interface_body: ib }
-      }
-
-pub interface_forward_dcl -> interface_dcl
-    = interface_kind id:identifier { interface_dcl::interface_forward_dcl(id) }
-
-interface_kind = KEYWORD<"interface">
-
-pub interface_inheritance_spec -> Vec<interface_name>
-    = ":" __ is:interface_name ++ ("," __) { is }
-
-pub interface_name -> interface_name
-    = scoped_name
-
-pub interface_body -> Vec<export>
-    = export*
-
-pub export -> export
-    = od:op_dcl ";" __ { export::op_dcl(od) }
-    / ad:attr_dcl ";" __ { export::attr_dcl(ad) }
-
-pub op_dcl -> op_dcl
-    = ots:op_type_spec id:identifier "(" __ pds:parameter_dcls ")" __ re:raises_expr? {
-        ast::op_dcl { op_type_spec: ots, identifier: id, parameter_dcls: pds, raises_expr: re }
-      }
-
-pub op_type_spec -> op_type_spec
-    = ts:type_spec { op_type_spec::type_spec(ts) }
-    / KEYWORD<"void"> { op_type_spec::void }
-
-pub parameter_dcls -> Vec<param_dcl>
-    = pds:param_dcl ** ("," __) { pds }
-
-pub param_dcl -> param_dcl
-    = pa:param_attribute ts:type_spec sd:simple_declarator {
-        ast::param_dcl { param_attribute: pa, type_spec: ts, simple_declarator: sd }
-      }
-
-pub param_attribute -> param_attribute
-    = KEYWORD<"in"> { param_attribute::in_ }
-    / KEYWORD<"out"> { param_attribute::out }
-    / KEYWORD<"inout"> { param_attribute::inout }
-
-pub raises_expr -> raises_expr
-    = KEYWORD<"raises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
-
-pub attr_dcl -> attr_dcl
-    = roas:readonly_attr_spec { attr_dcl::readonly_attr_spec(roas) }
-    / attr_spec:attr_spec { attr_dcl::attr_spec(attr_spec) }
-
-pub readonly_attr_spec -> readonly_attr_spec
-    = KEYWORD<"readonly"> KEYWORD<"attribute"> ts:type_spec road:readonly_attr_declarator {
-        ast::readonly_attr_spec { type_spec: ts, readonly_attr_declarator: road }
-      }
-
-pub readonly_attr_declarator -> readonly_attr_declarator
-    = sd:simple_declarator re:raises_expr {
-        readonly_attr_declarator::simple_declarator_raises(sd, re)
-      }
-    / sds:simple_declarator ++ ("," __) {
-        readonly_attr_declarator::simple_declarators(sds)
-      }
-
-pub attr_spec -> attr_spec
-    = KEYWORD<"attribute"> ts:type_spec ad:attr_declarator {
-        ast::attr_spec { type_spec: ts, attr_declarator: ad }
-      }
-
-pub attr_declarator -> attr_declarator
-    = sd:simple_declarator are:attr_raises_expr {
-        attr_declarator::simple_declarator_raises(sd, are)
-      }
-    / sds:simple_declarator ++ ("," __) {
-        attr_declarator::simple_declarators(sds)
-      }
-
-pub attr_raises_expr -> attr_raises_expr
-    = gee:get_excep_expr see:set_excep_expr? { attr_raises_expr::get_excep_expr(gee, see) }
-    / see:set_excep_expr { attr_raises_expr::set_excep_expr(see) }
-
-pub get_excep_expr -> get_excep_expr
-    = KEYWORD<"getraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
-
-pub set_excep_expr -> set_excep_expr
-    = KEYWORD<"setraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+pub identifier -> identifier
+    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
+    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
 
 character_literal_char -> char
     = !("'" / "\\" / eol_char) c:$latin1_char { c.chars().next().unwrap() }
@@ -446,10 +466,6 @@ unicode_escape_char -> char
     = "\\u" i:$(hex_digit*<1,4>) {
         char::from_u32(u32::from_str_radix(i, 16).unwrap()).unwrap()
       }
-
-pub boolean_literal -> literal
-    = "TRUE" __ { literal::boolean_literal(true) }
-    / "FALSE" __ { literal::boolean_literal(false) }
 
 pub string_literal -> literal
     = ss:one_string_literal ++ __ {
