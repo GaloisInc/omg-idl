@@ -1,5 +1,23 @@
-#[derive(Debug, PartialEq)]
+use std::hash::{Hash, Hasher};
+
+#[derive(Clone, Debug)]
 pub struct identifier(pub String);
+
+impl Eq for identifier {}
+
+// per IDL spec, identifiers collide case-insensitively
+impl PartialEq for identifier {
+    fn eq(&self, other: &identifier) -> bool {
+        self.0.to_lowercase() == other.0.to_lowercase()
+    }
+}
+
+// per IDL spec, identifiers collide case-insensitively
+impl Hash for identifier {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_lowercase().hash(state);
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct specification(pub Vec<definition>);
@@ -19,7 +37,7 @@ pub struct module_dcl {
     pub defs: Vec<definition>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum scoped_name {
     Qualified(Vec<identifier>),
     FileScope(Vec<identifier>),
@@ -61,7 +79,7 @@ pub enum const_type {
 //
 // const_expr, or_expr, xor_expr, and_expr, shift_expr, add_expr,
 // mult_expr, unary_expr, unary_operator, primary_expr
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum const_expr {
     scoped_name(scoped_name),
     literal(literal),
@@ -86,7 +104,7 @@ impl const_expr {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum literal {
     integer_literal(u64),
     floating_pt_literal(f64),
@@ -137,7 +155,7 @@ pub enum Bound {
 }
 
 // collapsed
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum integer_type {
     signed_short_int,
     signed_long_int,
@@ -147,7 +165,7 @@ pub enum integer_type {
     unsigned_longlong_int,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum floating_pt_type {
     float,
     double,

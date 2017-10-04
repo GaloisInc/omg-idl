@@ -63,8 +63,8 @@ unary_expr -> const_expr
     / primary_expr
 
 primary_expr -> const_expr
-    = sn:scoped_name { const_expr::scoped_name(sn) }
-    / lit:literal { const_expr::literal(lit) }
+    = lit:literal { const_expr::literal(lit) }
+    / sn:scoped_name { const_expr::scoped_name(sn) }
     / "(" __ e:const_expr ")" __ { e }
 
 literal -> literal

@@ -9,3 +9,7 @@ peg = "0.5"
 
 [dependencies]
 quote = "0.3"
+
+[[bin]]
+name = "compile_dds"
+path = "bin/compile_dds.rs"
