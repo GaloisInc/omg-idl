@@ -65,7 +65,7 @@ impl Scope {
 enum ScopeEntry {
     Child(Path),
     Const,
-    Cousin(Path),
+    Relative(Path),
     EnumType,
     FwdDecl,
     Other,
@@ -134,14 +134,14 @@ impl State {
 
     /// Perform resolution as in `resolve`, but add the returned entry
     /// to the current scope as required by many use sites in IDL. If
-    /// the resolved entry is a child scope, convert it to a cousin
+    /// the resolved entry is a child scope, convert it to a relative
     /// scope.
     fn resolve_and_introduce(&mut self, id: &identifier) -> Option<ScopeEntry> {
         let x: Option<ScopeEntry> = self.resolve(id);
         x.map(move |e| {
             let cur = self.get_current_scope_mut();
             let e = match e {
-                ScopeEntry::Child(path) => ScopeEntry::Cousin(path),
+                ScopeEntry::Child(path) => ScopeEntry::Relative(path),
                 _ => e
             };
             cur.env.insert(id.clone(), e.clone());
@@ -248,14 +248,14 @@ impl specification {
         for def in self.0.iter() {
             defs.push(def.emit_rust(st)?);
         }
-        Ok(quote! { #(#defs)* })
+        Ok(quote! {#(#defs)*})
     }
 }
 
 impl definition {
     fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
         match *self {
-            // definition::module_dcl(d) => d.emit_rust(st),
+            definition::module_dcl(ref d) => d.emit_rust(st),
             definition::const_dcl(ref d) => d.emit_rust(st),
             // definition::type_dcl(d) => d.emit_rust(st),
             // definition::except_dcl(d) => d.emit_rust(st),
@@ -265,21 +265,45 @@ impl definition {
     }
 }
 
+impl module_dcl {
+    fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
+        let mut new_path = st.current_scope.clone();
+        new_path.push(self.identifier.clone());
+        let id = st.bind(&self.identifier, ScopeEntry::Child(new_path.clone()))?;
+        let mut new_scope = Scope::new();
+        new_scope.env.insert(self.identifier.clone(), ScopeEntry::Relative(st.current_scope.clone()));
+        st.scopes.insert(new_path.clone(), new_scope);
+        st.current_scope = new_path;
+        st.module_depth += 1;
+        let mut defs = vec![];
+        for def in self.defs.iter() {
+            defs.push(def.emit_rust(st)?);
+        }
+        Ok(quote! {mod #id { #(#defs)* }})
+    }
+}
+
 impl const_dcl {
     fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
         let id = st.bind(&self.identifier, ScopeEntry::Const)?;
         let ty = self.ty.emit_rust(st)?;
         let expr = {
             use ast::const_type::*;
+            use ast::integer_type::unsigned_short_int;
             match self.ty {
                 integer_type(ref ity) => self.expr.eval_int(ity, false),
                 floating_pt_type(ref fpty) => self.expr.eval_fp(fpty),
                 char_type => self.expr.eval_char(),
                 wide_char_type => self.expr.eval_wide_char(),
-                _ => Err(Error::Unimplemented)
+                boolean_type => self.expr.eval_boolean(),
+                octet_type => self.expr.eval_int(&unsigned_short_int, true),
+                string_type(ref b) => self.expr.eval_string(&b),
+                wide_string_type(ref b) => self.expr.eval_wide_string(&b),
+                scoped_name(_) => self.expr.eval_scoped_name(st),
+                fixed_pt_const_type => return Err(Error::Unsupported("fixed")),
             }
         }?;
-        Ok(quote! { const #id: #ty = #expr; })
+        Ok(quote! {const #id: #ty = #expr;})
     }
 }
 
@@ -416,7 +440,7 @@ impl const_expr {
                     Err(Error::IntOverflow(*ity, self.clone()))
                 } else {
                     let i = i as i16;
-                    Ok(quote! { #i })
+                    Ok(quote! {#i})
                 }
             },
             signed_long_int => {
@@ -425,12 +449,12 @@ impl const_expr {
                     Err(Error::IntOverflow(*ity, self.clone()))
                 } else {
                     let i = i as i32;
-                    Ok(quote! { #i })
+                    Ok(quote! {#i})
                 }
             },
             signed_longlong_int => {
                 let i = eval_signed(self, ity)?;
-                Ok(quote! { #i })
+                Ok(quote! {#i})
             },
             unsigned_short_int => {
                 let i = eval_unsigned(self, ity)?;
@@ -439,14 +463,14 @@ impl const_expr {
                         Err(Error::IntOverflow(*ity, self.clone()))
                     } else {
                         let i = i as u8;
-                        Ok(quote! { #i })
+                        Ok(quote! {#i})
                     }
                 } else {
                     if i > u16::max_value() as u64 {
                         Err(Error::IntOverflow(*ity, self.clone()))
                     } else {
                         let i = i as u16;
-                        Ok(quote! { #i })
+                        Ok(quote! {#i})
                     }
                 }
             },
@@ -456,12 +480,12 @@ impl const_expr {
                     Err(Error::IntOverflow(*ity, self.clone()))
                 } else {
                     let i = i as u32;
-                    Ok(quote! { #i })
+                    Ok(quote! {#i})
                 }
             },
             unsigned_longlong_int => {
                 let i = eval_unsigned(self, ity)?;
-                Ok(quote! { #i })
+                Ok(quote! {#i})
             },
         }?;
         Ok(v)
@@ -497,12 +521,12 @@ impl const_expr {
                     Err(Error::FloatOverflow(*fpty, self.clone()))
                 } else {
                     let x = x as f32;
-                    Ok(quote! { #x })
+                    Ok(quote! {#x})
                 }
             },
             double => {
                 let x = eval(self, fpty)?;
-                Ok(quote! { #x })
+                Ok(quote! {#x})
             },
             long_double => Err(Error::Unsupported("long double")),
         }?;
@@ -513,7 +537,7 @@ impl const_expr {
         use ast::const_expr::literal;
         use ast::literal::character_literal;
         match *self {
-            literal(character_literal(c)) => Ok(quote! { #c }),
+            literal(character_literal(c)) => Ok(quote! {#c}),
             _ => Err(Error::ConstTypeError("char", self.clone()))
         }
     }
@@ -522,8 +546,63 @@ impl const_expr {
         use ast::const_expr::literal;
         use ast::literal::wide_character_literal;
         match *self {
-            literal(wide_character_literal(c)) => Ok(quote! { #c }),
+            literal(wide_character_literal(c)) => Ok(quote! {#c}),
             _ => Err(Error::ConstTypeError("wchar", self.clone()))
         }
     }
+
+    fn eval_boolean(&self) -> Result<Tokens, Error> {
+        use ast::const_expr::literal;
+        use ast::literal::boolean_literal;
+        match *self {
+            literal(boolean_literal(b)) => Ok(quote! {#b}),
+            _ => Err(Error::ConstTypeError("boolean", self.clone()))
+        }
+    }
+
+    fn eval_string(&self, b: &Bound) -> Result<Tokens, Error> {
+        use ast::const_expr::literal;
+        use ast::literal::string_literal;
+        match *self {
+            literal(string_literal(ref s)) => {
+                match *b {
+                    Bound::Unbounded => (),
+                    Bound::Bounded(_) => return Err(Error::Unsupported("bounded string")),
+                }
+                Ok(quote! {#s})
+            },
+            _ => Err(Error::ConstTypeError("string", self.clone()))
+        }
+    }
+
+    fn eval_wide_string(&self, b: &Bound) -> Result<Tokens, Error> {
+        use ast::const_expr::literal;
+        use ast::literal::wide_string_literal;
+        match *self {
+            literal(wide_string_literal(ref s)) => {
+                match *b {
+                    Bound::Unbounded => (),
+                    Bound::Bounded(_) => return Err(Error::Unsupported("bounded wide string")),
+                }
+                Ok(quote! {#s})
+            },
+            _ => Err(Error::ConstTypeError("wstring", self.clone()))
+        }
+    }
+
+    fn eval_scoped_name(&self, st: &mut State) -> Result<Tokens, Error> {
+        use ast::const_expr::scoped_name;
+        match *self {
+            scoped_name(ref sn) => {
+                let (sn, entry) = st.resolve_scoped_name(&sn)?;
+                match entry {
+                    ScopeEntry::EnumType => (),
+                    _ => return Err(Error::ConstTypeError("enum", self.clone()))
+                }
+                let sn = st.emit_scoped_name(&sn);
+                Ok(quote! {#sn})
+            },
+            _ => Err(Error::ConstTypeError("enum", self.clone()))
+        }
+    }   
 }

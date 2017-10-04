@@ -6,12 +6,13 @@ use omg_idl::emit_rust;
 use omg_idl::parser;
 
 // const DDS_DCPS: &'static str = include_str!("dds_dcps.idl");
-// const DDS_DCPS: &'static str = "const long x = 40 + 2;\n";
-// const DDS_DCPS: &'static str = "const double x = 40. + 2.;\n";
-// const DDS_DCPS: &'static str = "const char c = 'x';\n";
-// const DDS_DCPS: &'static str = "const wchar c = L'\\u03bb';\n";
-// const DDS_DCPS: &'static str = "const Foo::Bar BAZ = Baz;\n";
-const DDS_DCPS: &'static str = "const Foo::Bar BAZ = Baz;\n";
+// const DDS_DCPS: &'static str = "const long x = 40 + 2;";
+// const DDS_DCPS: &'static str = "const double x = 40. + 2.;";
+// const DDS_DCPS: &'static str = "const char c = 'x';";
+// const DDS_DCPS: &'static str = "const wchar c = L'\\u03bb';";
+// const DDS_DCPS: &'static str = "const Foo::Bar BAZ = Baz;";
+// const DDS_DCPS: &'static str = "const wstring s = L\"\\u03bb\";";
+const DDS_DCPS: &'static str = "module Foo { const wstring s = L\"\\u03bb\"; };";
 
 fn main() {
     let spec = parser::specification(DDS_DCPS).unwrap();
