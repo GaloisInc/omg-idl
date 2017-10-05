@@ -7,6 +7,7 @@ use ast::*;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
+    AmbiguousReference(identifier),
     ConstTypeError(&'static str, const_expr),
     FloatOverflow(floating_pt_type, const_expr),
     IntOverflow(integer_type, const_expr),
@@ -49,14 +50,14 @@ impl State {
 #[derive(Debug)]
 struct Scope {
     env: HashMap<identifier, ScopeEntry>,
-    inherited: Option<Path>,
+    inherited: Vec<Path>,
 }
 
 impl Scope {
     fn new() -> Scope {
         Scope {
             env: HashMap::new(),
-            inherited: None,
+            inherited: vec![],
         }
     }
 }
@@ -65,10 +66,12 @@ impl Scope {
 enum ScopeEntry {
     Child(Path),
     Const,
-    Relative(Path),
-    EnumType,
+    EnumType(scoped_name),
+    EnumVariant(scoped_name),
     FwdDecl,
+    Native,
     Other,
+    Relative(Path),
 }
 
 impl State {
@@ -86,25 +89,30 @@ impl State {
     
     /// resolve an identifier all the way up the parent scopes and
     /// inherited scopes (if any) of the current scope
-    fn resolve(&self, id: &identifier) -> Option<ScopeEntry> {
+    fn resolve(&self, id: &identifier) -> Result<Option<ScopeEntry>, Error> {
         self.resolve_in(id, &self.current_scope)
     }
     
     /// resolve an identifier all the way up the parent scopes and
     /// inherited scopes (if any) of the given scope
-    fn resolve_in(&self, id: &identifier, path: &Path) -> Option<ScopeEntry> {
-        fn resolve_inherited<'a>(st: &'a State, id: &identifier, sc0: &'a Scope) -> Option<&'a ScopeEntry> {
-            let mut here = sc0;
-            while let Some(ref inh_path) = here.inherited {
-                let inh = st.scopes.get(inh_path).expect("inherited scope exists");
-                let x = inh.env.get(id);
-                if x.is_some() {
-                    return x;
-                } else {
-                    here = inh;
+    fn resolve_in(&self, id: &identifier, path: &Path) -> Result<Option<ScopeEntry>, Error> {
+        fn resolve_inherited(st: &State, id: &identifier, sc0: &Scope) -> Result<Option<ScopeEntry>, Error> {
+            if let Some(e) = sc0.env.get(id).cloned() {
+                Ok(Some(e))
+            } else {
+                let mut out = None;
+                for inh in sc0.inherited.iter() {
+                    let sc = st.scopes.get(inh).expect("inherited scope exists");
+                    if let Some(e) = resolve_inherited(st, id, sc)? {
+                        if out.is_none() {
+                            out = Some(e);
+                        } else {
+                            return Err(Error::AmbiguousReference(id.clone()));
+                        }
+                    }
                 }
+                Ok(out)
             }
-            None
         }
 
         // A loop that runs on all of the parent scope paths reachable from the target scope:
@@ -119,15 +127,15 @@ impl State {
             let here = self.scopes.get(&path).expect("current and parent scopes exist");
             // 1
             if let Some(e) = here.env.get(id) {
-                return Some(e.clone());
+                return Ok(Some(e.clone()));
             }
             // 2
-            if let Some(e) = resolve_inherited(self, id, here) {
-                return Some(e.clone());
+            if let Some(e) = resolve_inherited(self, id, here)? {
+                return Ok(Some(e));
             }
             // 3
             if let None = path.pop() {
-                return None;
+                return Ok(None);
             }
         }
     }
@@ -136,9 +144,9 @@ impl State {
     /// to the current scope as required by many use sites in IDL. If
     /// the resolved entry is a child scope, convert it to a relative
     /// scope.
-    fn resolve_and_introduce(&mut self, id: &identifier) -> Option<ScopeEntry> {
-        let x: Option<ScopeEntry> = self.resolve(id);
-        x.map(move |e| {
+    fn resolve_and_introduce(&mut self, id: &identifier) -> Result<Option<ScopeEntry>, Error> {
+        let x: Option<ScopeEntry> = self.resolve(id)?;
+        Ok(x.map(move |e| {
             let cur = self.get_current_scope_mut();
             let e = match e {
                 ScopeEntry::Child(path) => ScopeEntry::Relative(path),
@@ -146,25 +154,30 @@ impl State {
             };
             cur.env.insert(id.clone(), e.clone());
             e
-        })
+        }))
     }
 
-    /// resolves and normalizes a scoped name to file scope
-    fn resolve_scoped_name(&mut self, sn: &scoped_name) -> Result<(scoped_name, ScopeEntry), Error> {
+    /// resolves and normalizes a scoped name
+    fn resolve_scoped_name(&mut self, sn: &scoped_name) -> Result<ScopeEntry, Error> {
         match *sn {
             scoped_name::Qualified(ref path) => {
                 let pfx = path.first().expect("qualified name starts with an id");
                 // only introduce for the root
-                let mut entry: ScopeEntry = self.resolve_and_introduce(pfx).ok_or(Error::UnboundId(pfx.clone()))?;
-                let mut out_path = vec![];
+                let mut entry: ScopeEntry = self.resolve_and_introduce(pfx)?.ok_or(Error::UnboundId(pfx.clone()))?;
                 for layer in path.get(1..).expect("qualified name non-empty") {
                     // can't set entry directly within the match
                     let next;
                     match entry {
                         ScopeEntry::Child(ref child) => {
                             let s = self.scopes.get(child).expect("child scope must exist");
-                            out_path = child.clone();
-                            out_path.push(layer.clone());
+                            if let Some(e) = s.env.get(layer) {
+                                next = e.clone();
+                            } else {
+                                return Err(Error::UnboundId(layer.clone()))
+                            }
+                        },
+                        ScopeEntry::Relative(ref child) => {
+                            let s = self.scopes.get(child).expect("relative scope must exist");
                             if let Some(e) = s.env.get(layer) {
                                 next = e.clone();
                             } else {
@@ -176,7 +189,7 @@ impl State {
                     entry = next;
                 }
                 // final entry should be our id
-                Ok((scoped_name::FileScope(out_path), entry))
+                Ok(entry)
             },
             scoped_name::FileScope(ref path) => {
                 let pfx = path.first().expect("file-scoped path has at least one id");
@@ -198,10 +211,10 @@ impl State {
                         }
                         entry = next;
                     }
-                    Ok((sn.clone(), entry))
+                    Ok(entry)
                 } else {
                     // path just contained one component; no more work to do
-                    Ok((sn.clone(), entry))
+                    Ok(entry)
                 }
             }
         }
@@ -227,12 +240,15 @@ impl State {
         match sn {
             &scoped_name::FileScope(ref path) => {
                 let mut id = String::new();
-                for _ in 1..self.module_depth {
+                for _ in 0..self.module_depth {
                     id.push_str("super::");
                 }
-                for layer in path {
-                    id.push_str(layer.0.as_str());
+                let mut path = path.clone();
+                path.reverse();
+                id.push_str(path.pop().expect("path must have at least one component").0.as_str());
+                while let Some(layer) = path.pop() {
                     id.push_str("::");
+                    id.push_str(layer.0.as_str());
                 }
                 let id = Ident::new(id);
                 quote!{#id}
@@ -254,32 +270,89 @@ impl specification {
 
 impl definition {
     fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
+        use ast::definition::*;
         match *self {
-            definition::module_dcl(ref d) => d.emit_rust(st),
-            definition::const_dcl(ref d) => d.emit_rust(st),
-            // definition::type_dcl(d) => d.emit_rust(st),
-            // definition::except_dcl(d) => d.emit_rust(st),
-            // definition::interface_dcl(d) => d.emit_rust(st),
+            module_dcl(ref d) => d.emit_rust(st),
+            const_dcl(ref d) => d.emit_rust(st),
+            type_dcl(ref d) => d.emit_rust(st),
+            // definition::except_dcl(ref d) => d.emit_rust(st),
+            // definition::interface_dcl(ref d) => d.emit_rust(st),
             _ => Err(Error::Unimplemented)
         }
     }
 }
 
+impl type_dcl {
+    fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
+        use ast::type_dcl::*;
+        match *self {
+            constr_type_dcl(ref ctd) => ctd.emit_rust(st),
+            native_dcl(ref id) => {
+                // introduce the name into scope, but don't emit any
+                // Rust code (it would amount to `type foo = foo;`)
+                st.bind(id, ScopeEntry::Native)?;
+                Ok(quote!{})
+            },
+            typedef_dcl(ref td) => Err(Error::Unimplemented),
+        }
+    }
+}
+
+impl constr_type_dcl {
+    fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
+        use ast::constr_type_dcl::*;
+        match *self {
+            struct_dcl(ref sd) => Err(Error::Unimplemented),
+            union_dcl(ref ud) => Err(Error::Unimplemented),
+            enum_dcl(ref ed) => ed.emit_rust(st),
+        }
+    }
+}
+
+impl enum_dcl {
+    fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
+        let mut path = scoped_name::FileScope(st.current_scope.clone());
+        path.push(self.identifier.clone());
+        let id = st.bind(&self.identifier, ScopeEntry::EnumType(path.clone()))?;
+        let mut variants = vec![];
+        for e in self.enumerators.iter() {
+            let mut variant_path = path.clone();
+            variant_path.push(e.clone());
+            variants.push(st.bind(e, ScopeEntry::EnumVariant(variant_path))?);
+        }
+        Ok(quote!{pub enum #id { #(#variants),* }})
+    }
+}
+
 impl module_dcl {
     fn emit_rust(&self, st: &mut State) -> Result<Tokens, Error> {
+        // save the original scope
+        let original_scope = st.current_scope.clone();
+
+        // construct the new scope, though don't change the current
+        // scope yet so we bind the child entry in the right place
         let mut new_path = st.current_scope.clone();
         new_path.push(self.identifier.clone());
         let id = st.bind(&self.identifier, ScopeEntry::Child(new_path.clone()))?;
+
+        // create the inner scope with the module name in scope
         let mut new_scope = Scope::new();
         new_scope.env.insert(self.identifier.clone(), ScopeEntry::Relative(st.current_scope.clone()));
         st.scopes.insert(new_path.clone(), new_scope);
+
+        // adjust the current scope and module depth before processing definitions
         st.current_scope = new_path;
         st.module_depth += 1;
         let mut defs = vec![];
         for def in self.defs.iter() {
             defs.push(def.emit_rust(st)?);
         }
-        Ok(quote! {mod #id { #(#defs)* }})
+
+        // restore the original scope and module depth
+        st.current_scope = original_scope;
+        st.module_depth -= 1;
+
+        Ok(quote! {pub mod #id { #(#defs)* }})
     }
 }
 
@@ -330,9 +403,9 @@ impl const_type {
             string_type(_) => Ok(quote! {&'static str}),
             wide_string_type(_) => Ok(quote! {&'static str}),
             scoped_name(ref sn) => {
-                let (sn, entry) = st.resolve_scoped_name(sn)?;
+                let entry = st.resolve_scoped_name(sn)?;
                 match entry {
-                    ScopeEntry::EnumType => Ok(st.emit_scoped_name(&sn)),
+                    ScopeEntry::EnumType(sn) => Ok(st.emit_scoped_name(&sn)),
                     _ => Err(Error::InvalidConstType(sn.clone()))
                 }
             },
@@ -594,13 +667,14 @@ impl const_expr {
         use ast::const_expr::scoped_name;
         match *self {
             scoped_name(ref sn) => {
-                let (sn, entry) = st.resolve_scoped_name(&sn)?;
+                let entry = st.resolve_scoped_name(&sn)?;
                 match entry {
-                    ScopeEntry::EnumType => (),
-                    _ => return Err(Error::ConstTypeError("enum", self.clone()))
+                    ScopeEntry::EnumVariant(sn) => {
+                        let sn = st.emit_scoped_name(&sn);
+                        Ok(quote!{#sn})
+                    },
+                    _ => Err(Error::ConstTypeError("enum", self.clone()))
                 }
-                let sn = st.emit_scoped_name(&sn);
-                Ok(quote! {#sn})
             },
             _ => Err(Error::ConstTypeError("enum", self.clone()))
         }

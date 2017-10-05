@@ -12,7 +12,10 @@ use omg_idl::parser;
 // const DDS_DCPS: &'static str = "const wchar c = L'\\u03bb';";
 // const DDS_DCPS: &'static str = "const Foo::Bar BAZ = Baz;";
 // const DDS_DCPS: &'static str = "const wstring s = L\"\\u03bb\";";
-const DDS_DCPS: &'static str = "module Foo { const wstring s = L\"\\u03bb\"; };";
+// const DDS_DCPS: &'static str = "module Foo { const wstring s = L\"\\u03bb\"; };";
+// const DDS_DCPS: &'static str = "enum Foo { Bar, Baz }; const Foo b = Bar;";
+// const DDS_DCPS: &'static str = "module M { enum Foo { Bar, Baz }; }; const M::Foo F = M::Bar;";
+const DDS_DCPS: &'static str = "enum Foo { Bar, Baz }; module M { const Foo F = Bar; };";
 
 fn main() {
     let spec = parser::specification(DDS_DCPS).unwrap();
