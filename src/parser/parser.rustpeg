@@ -317,7 +317,7 @@ param_attribute -> param_attribute
     / KEYWORD<"inout"> { param_attribute::inout }
 
 raises_expr -> raises_expr
-    = KEYWORD<"raises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+    = KEYWORD<"raises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { ast::raises_expr(sns) }
 
 attr_dcl -> attr_dcl
     = roas:readonly_attr_spec { attr_dcl::readonly_attr_spec(roas) }
@@ -354,10 +354,10 @@ attr_raises_expr -> attr_raises_expr
     / see:set_excep_expr { attr_raises_expr::set_excep_expr(see) }
 
 get_excep_expr -> get_excep_expr
-    = KEYWORD<"getraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+    = KEYWORD<"getraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { raises_expr(sns) }
 
 set_excep_expr -> set_excep_expr
-    = KEYWORD<"setraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { sns }
+    = KEYWORD<"setraises"> "(" __ sns:scoped_name ++ ("," __) ")" __ { raises_expr(sns) }
 
 /* Rules derived from 7.2 Lexical Conventions */
 

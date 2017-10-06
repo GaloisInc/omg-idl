@@ -51,7 +51,7 @@ pub struct Op {
     pub id: Id,
     pub ret: Type,
     pub params: Vec<(Id, ParamDir, Type)>,
-    pub raises: Vec<Id>,
+    pub raises: Vec<QName>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -66,8 +66,8 @@ pub struct Attr {
     pub id: Id,
     pub read_only: bool,
     pub ty: Type,
-    pub get_raises: Vec<Id>,
-    pub set_raises: Vec<Id>,
+    pub get_raises: Vec<QName>,
+    pub set_raises: Vec<QName>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -141,6 +141,18 @@ pub enum Type {
     // unsupported
     F128,
     Fixed,
+}
+
+impl Type {
+    pub fn is_constr_type(&self) -> bool {
+        use self::Type::*;
+        match *self {
+            Struct(_) => true,
+            Union(_) => true,
+            Enum(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

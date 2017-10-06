@@ -333,7 +333,8 @@ pub enum param_attribute {
     inout,
 }
 
-pub type raises_expr = Vec<scoped_name>;
+#[derive(Debug, PartialEq)]
+pub struct raises_expr(pub Vec<scoped_name>);
 
 #[derive(Debug, PartialEq)]
 pub enum attr_dcl {
@@ -371,6 +372,6 @@ pub enum attr_raises_expr {
     set_excep_expr(set_excep_expr),
 }
 
-pub type get_excep_expr = Vec<scoped_name>;
+pub type get_excep_expr = raises_expr;
 
-pub type set_excep_expr = Vec<scoped_name>;
+pub type set_excep_expr = raises_expr;

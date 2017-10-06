@@ -1,4 +1,3 @@
-use std;
 use std::collections::{HashMap};
 use std::rc::Rc;
 
@@ -11,10 +10,9 @@ pub enum Error {
     ConstTypeError(&'static str, const_expr),
     FloatOverflow(floating_pt_type, const_expr),
     IntOverflow(integer_type, const_expr),
-    InvalidType(scoped_name),
+    InvalidType(&'static str, scoped_name),
     NameClash(identifier),
     UnboundId(identifier),
-    Unimplemented,
     Unknown(String),
     Unsupported(&'static str),
 }
@@ -68,8 +66,9 @@ enum ScopeEntry {
     Const,
     EnumType(Path),
     EnumVariant(Path),
-    FwdDecl,
+    FwdDecl(core::Type),
     Native,
+    TypeDef(core::Type),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,13 +92,13 @@ impl State {
     fn get_root_scope(&self) -> &Scope {
         self.scopes.get(&vec![]).expect("root scope exists")
     }
-    
+
     /// resolve an identifier all the way up the parent scopes and
     /// inherited scopes (if any) of the current scope
     fn resolve(&self, id: &identifier) -> Result<Option<ScopeEntry>, Error> {
         self.resolve_in(id, &self.current_scope)
     }
-    
+
     /// resolve an identifier all the way up the parent scopes and
     /// inherited scopes (if any) of the given scope
     fn resolve_in(&self, id: &identifier, path: &Path) -> Result<Option<ScopeEntry>, Error> {
@@ -234,7 +233,7 @@ impl State {
         // catch any clashes
         match cur.env.get(id) {
             None => (),
-            Some(&ScopeEntry::FwdDecl) => (),
+            Some(&ScopeEntry::FwdDecl(_)) => (),
             _ => return Err(Error::NameClash(id.clone()))
         }
         cur.env.insert(id.clone(), entry);
@@ -259,10 +258,295 @@ impl definition {
             module_dcl(ref d) => Ok(vec![core::Definition::Module(d.to_core(st)?)]),
             const_dcl(ref d) => Ok(vec![core::Definition::Const(d.to_core(st)?)]),
             type_dcl(ref d) => d.to_core(st),
-            // definition::except_dcl(ref d) => d.to_core(st),
-            // definition::interface_dcl(ref d) => d.to_core(st),
-            _ => Err(Error::Unimplemented)
+            except_dcl(ref d) => Ok(vec![core::Definition::Except(d.to_core(st)?)]),
+            interface_dcl(ref d) => Ok(d.to_core(st)?.map(|d| core::Definition::Interface(d)).into_iter().collect()),
         }
+    }
+}
+
+impl interface_dcl {
+    fn to_core(&self, st: &mut State) -> Result<Option<Rc<core::Interface>>, Error> {
+        use parser::ast::interface_dcl::*;
+        match *self {
+            interface_def(ref id) => {
+                Ok(Some(id.to_core(st)?))
+            },
+            interface_forward_dcl(ref id) => {
+                let mut path = st.current_scope.clone();
+                path.push(id.clone());
+                let ty = core::Type::Interface(path);
+                st.bind(id, ScopeEntry::FwdDecl(ty.clone()))?;
+                Ok(None)
+            }
+        }
+    }
+}
+
+impl interface_def {
+    fn to_core(&self, st: &mut State) -> Result<Rc<core::Interface>, Error> {
+        // save the original scope
+        let original_scope = st.current_scope.clone();
+
+        // construct the new scope, though don't change the current
+        // scope yet so we bind the child entry in the right place
+        let mut new_path = st.current_scope.clone();
+        new_path.push(self.identifier.clone());
+        st.bind(&self.identifier, ScopeEntry::Child(new_path.clone(), ScopeType::Interface))?;
+
+        // create the inner scope
+        let new_scope = Scope::new();
+        st.scopes.insert(new_path.clone(), new_scope);
+
+        // adjust the current scope before processing members
+        st.current_scope = new_path.clone();
+
+        let mut parents = vec![];
+        if let Some(ref inh) = self.interface_inheritance_spec {
+            for sn in inh.iter() {
+                let entry = st.resolve_scoped_name(sn)?;
+                match entry {
+                    ScopeEntry::Child(path, ScopeType::Interface) => parents.push(path.clone()),
+                    ScopeEntry::Relative(path, ScopeType::Interface) => parents.push(path.clone()),
+                    ScopeEntry::TypeDef(core::Type::Interface(path)) => parents.push(path.clone()),
+                    _ => ()
+                }
+            }
+        }
+
+        let mut ops = vec![];
+        let mut attrs = vec![];
+        for export in self.interface_body.iter() {
+            use parser::ast::export::*;
+            match *export {
+                op_dcl(ref od) => ops.push(od.to_core(st)?),
+                attr_dcl(ref ad) => attrs.append(&mut ad.to_core(st)?),
+            }
+        }
+
+        // restore the original scope
+        st.current_scope = original_scope;
+
+        let rc = Rc::new(core::Interface {
+            id: self.identifier.clone(),
+            parents: parents,
+            ops: ops,
+            attrs: attrs,
+        });
+        st.core_env.insert(new_path.clone(), core::Entry::Interface(Rc::downgrade(&rc)));
+        Ok(rc)
+    }
+}
+
+impl op_dcl {
+    fn to_core(&self, st: &mut State) -> Result<core::Op, Error> {
+        let original_scope = st.current_scope.clone();
+
+        // operations introduce a private, unnamed scope
+        let private_scope = identifier("<op_dcl>".to_owned());
+        let mut new_path = st.current_scope.clone();
+        new_path.push(private_scope.clone());
+
+        // create the inner scope
+        let new_scope = Scope::new();
+        st.scopes.insert(new_path.clone(), new_scope);
+
+        // adjust the current scope before processing parameters
+        st.current_scope = new_path.clone();
+
+        let ret = {
+            use parser::ast::op_type_spec::*;
+            match self.op_type_spec {
+                type_spec(ref ts) => ts.to_core(st)?,
+                void => core::Type::Void,
+            }
+        };
+
+        let mut params = vec![];
+        for pd in self.parameter_dcls.iter() {
+            params.push(pd.to_core(st)?);
+        }
+
+        let raises;
+        if let Some(ref res) = self.raises_expr {
+            raises = res.to_core(st)?;
+        } else {
+            raises = vec![];
+        }
+
+        // restore the original scope
+        st.current_scope = original_scope;
+
+        let op = core::Op {
+            id: self.identifier.clone(),
+            ret: ret,
+            params: params,
+            raises: raises,
+        };
+        Ok(op)
+    }
+}
+
+impl raises_expr {
+    fn to_core(&self, st: &mut State) -> Result<Vec<core::QName>, Error> {
+        let mut raises = vec![];
+        for sn in self.0.iter() {
+            let entry = st.resolve_scoped_name(sn)?;
+            match entry {
+                ScopeEntry::Child(path, ScopeType::Except) => raises.push(path.clone()),
+                ScopeEntry::Relative(path, ScopeType::Except) => raises.push(path.clone()),
+                ScopeEntry::TypeDef(core::Type::Except(path)) => raises.push(path.clone()),
+                _ => return Err(Error::InvalidType("exception", sn.clone()))
+            }
+        }
+        Ok(raises)
+    }
+}
+
+impl param_dcl {
+    fn to_core(&self, st: &mut State) -> Result<(core::Id, core::ParamDir, core::Type), Error> {
+        use parser::ast::param_attribute::*;
+
+        let pd = match self.param_attribute {
+            in_ => core::ParamDir::In,
+            out => core::ParamDir::Out,
+            inout => core::ParamDir::InOut,
+        };
+
+        let ty = self.type_spec.to_core(st)?;
+
+        Ok((self.simple_declarator.clone(), pd, ty))
+    }
+}
+
+impl attr_dcl {
+    fn to_core(&self, st: &mut State) -> Result<Vec<core::Attr>, Error> {
+        use parser::ast::attr_dcl::*;
+        match *self {
+            readonly_attr_spec(ref s) => s.to_core(st),
+            attr_spec(ref s) => s.to_core(st),
+        }
+    }
+}
+
+impl readonly_attr_spec {
+    fn to_core(&self, st: &mut State) -> Result<Vec<core::Attr>, Error> {
+        use parser::ast::readonly_attr_declarator::*;
+
+        let ty = self.type_spec.to_core(st)?;
+
+        let mut attrs = vec![];
+        match self.readonly_attr_declarator {
+            simple_declarator_raises(ref sd, ref raises) => {
+                let attr = core::Attr {
+                    id: sd.clone(),
+                    read_only: true,
+                    ty: ty,
+                    get_raises: raises.to_core(st)?,
+                    set_raises: vec![],
+                };
+                attrs.push(attr);
+            },
+            simple_declarators(ref sds) => {
+                for sd in sds {
+                    let attr = core::Attr {
+                        id: sd.clone(),
+                        read_only: true,
+                        ty: ty.clone(),
+                        get_raises: vec![],
+                        set_raises: vec![],
+                    };
+                    attrs.push(attr);
+                }
+            },
+        }
+        Ok(attrs)
+    }
+}
+
+impl attr_spec {
+    fn to_core(&self, st: &mut State) -> Result<Vec<core::Attr>, Error> {
+        use parser::ast::attr_declarator::*;
+
+        let ty = self.type_spec.to_core(st)?;
+
+        let mut attrs = vec![];
+        match self.attr_declarator {
+            simple_declarator_raises(ref sd, ref are) => {
+                let (grs, srs) = are.to_core(st)?;
+                let attr = core::Attr {
+                    id: sd.clone(),
+                    read_only: false,
+                    ty: ty,
+                    get_raises: grs,
+                    set_raises: srs,
+                };
+                attrs.push(attr);
+            },
+            simple_declarators(ref sds) => {
+                for sd in sds {
+                    let attr = core::Attr {
+                        id: sd.clone(),
+                        read_only: false,
+                        ty: ty.clone(),
+                        get_raises: vec![],
+                        set_raises: vec![],
+                    };
+                    attrs.push(attr);
+                }
+            },
+        }
+        Ok(attrs)
+    }
+}
+
+impl attr_raises_expr {
+    fn to_core(&self, st: &mut State) -> Result<(Vec<core::QName>, Vec<core::QName>), Error> {
+        use parser::ast::attr_raises_expr::*;
+
+        match *self {
+            get_excep_expr(ref ges, Some(ref ses)) => Ok((ges.to_core(st)?, ses.to_core(st)?)),
+            get_excep_expr(ref ges, None) => Ok((ges.to_core(st)?, vec![])),
+            set_excep_expr(ref ses) => Ok((vec![], ses.to_core(st)?)),
+        }
+    }
+}
+
+impl except_dcl {
+    fn to_core(&self, st: &mut State) -> Result<Rc<core::Except>, Error> {
+        // save the original scope
+        let original_scope = st.current_scope.clone();
+
+        // construct the new scope, though don't change the current
+        // scope yet so we bind the child entry in the right place
+        let mut new_path = st.current_scope.clone();
+        new_path.push(self.identifier.clone());
+        st.bind(&self.identifier, ScopeEntry::Child(new_path.clone(), ScopeType::Except))?;
+
+        // create the inner scope
+        let new_scope = Scope::new();
+        st.scopes.insert(new_path.clone(), new_scope);
+
+        // adjust the current scope before processing members
+        st.current_scope = new_path.clone();
+
+        let mut members = vec![];
+        for member in self.members.iter() {
+            let ty = member.type_spec.to_core(st)?;
+            for decl in member.declarators.iter() {
+                let (id, arr_sizes) = decl.to_core(st)?;
+                match arr_sizes {
+                    None => members.push((id, ty.clone())),
+                    Some(sizes) => members.push((id, core::Type::Array(Box::new(ty.clone()), sizes))),
+                }
+            }
+        }
+
+        // restore the original scope and module depth
+        st.current_scope = original_scope;
+
+        let rc = Rc::new(core::Except { id: self.identifier.clone(), members: members });
+        st.core_env.insert(new_path.clone(), core::Entry::Except(Rc::downgrade(&rc)));
+        Ok(rc)
     }
 }
 
@@ -270,7 +554,10 @@ impl type_dcl {
     fn to_core(&self, st: &mut State) -> Result<Vec<core::Definition>, Error> {
         use parser::ast::type_dcl::*;
         match *self {
-            constr_type_dcl(ref ctd) => ctd.to_core(st),
+            constr_type_dcl(ref ctd) => {
+                let (def, _ty) = ctd.to_core(st)?;
+                Ok(def.into_iter().collect())
+            },
             native_dcl(ref id) => {
                 st.bind(id, ScopeEntry::Native)?;
                 let mut qname = st.current_scope.clone();
@@ -286,61 +573,93 @@ impl type_dcl {
 impl typedef_dcl {
     fn to_core(&self, st: &mut State) -> Result<Vec<core::Definition>, Error> {
         use parser::ast::typedef_dcl::*;
+        // shared code for the cases that have a straightforward type spec
         macro_rules! type_spec {
             ($ts:ident, $decls:ident) => ({
                 let ty = $ts.to_core(st)?;
                 let mut defs = vec![];
+                inner!(ty, $decls, defs);
+                Ok(defs)
+            })
+        }
+        // inner loop that creates TypeDef definitions for each of the
+        // declarators and adds them to the GlobalEnv
+        macro_rules! inner {
+            ($ty:ident, $decls:ident, $out:ident) => ({
                 for decl in $decls.iter() {
                     let (id, arr_sizes) = decl.to_core(st)?;
                     let ty = match arr_sizes {
-                        None => ty.clone(),
-                        Some(sizes) => core::Type::Array(Box::new(ty.clone()), sizes),
+                        None => $ty.clone(),
+                        Some(sizes) => core::Type::Array(Box::new($ty.clone()), sizes),
                     };
                     // push the definition and add it to the GlobalEnv
-                    defs.push(core::Definition::TypeDef(id.clone(), ty.clone()));
+                    $out.push(core::Definition::TypeDef(id.clone(), ty.clone()));
                     let mut path = st.current_scope.clone();
-                    path.push(id);
+                    path.push(id.clone());
+
+                    // bind in the current scope
+                    st.bind(&id, ScopeEntry::TypeDef(ty.clone()))?;
                     st.core_env.insert(path, core::Entry::TypeDef(ty));
                 }
-                Ok(defs)
             })
-        }        
+        }
         match *self {
             simple_type_spec(ref sts, ref decls) => type_spec!(sts, decls),
             template_type_spec(ref tts, ref decls) => type_spec!(tts, decls),
             constr_type_dcl(ref cd, ref decls) => {
-                unimplemented!()
+                // defining and redefining a type all at once, so we
+                // have to get the type from the constr_type_dcl
+                let (def, ty) = cd.to_core(st)?;
+                // start with the def (if any) from the constructed type
+                let mut defs: Vec<core::Definition> = def.into_iter().collect();
+                inner!(ty, decls, defs);
+                Ok(defs)
             },
         }
     }
 }
 
 impl constr_type_dcl {
-    fn to_core(&self, st: &mut State) -> Result<(Option<core::Definition>, core::Type)>, Error> {
+    fn to_core(&self, st: &mut State) -> Result<(Option<core::Definition>, core::Type), Error> {
         use parser::ast::constr_type_dcl::*;
         match *self {
-            struct_dcl(ref sd) => Ok(sd.to_core(st)?.map(|rc| core::Definition::Struct(rc)).into_iter().collect()),
-            union_dcl(ref ud) => Ok(ud.to_core(st)?.map(|rc| core::Definition::Union(rc)).into_iter().collect()),
-            enum_dcl(ref ed) => Ok(vec![core::Definition::Enum(ed.to_core(st)?)]),
+            struct_dcl(ref sd) => {
+                let (s, ty) = sd.to_core(st)?;
+                Ok((s.map(|rc| core::Definition::Struct(rc)), ty))
+            },
+            union_dcl(ref ud) => {
+                let (u, ty) = ud.to_core(st)?;
+                Ok((u.map(|rc| core::Definition::Union(rc)), ty))
+            },
+            enum_dcl(ref ed) => {
+                let (e, ty) = ed.to_core(st)?;
+                Ok((Some(core::Definition::Enum(e)), ty))
+            },
         }
     }
 }
 
 impl union_dcl {
-    fn to_core(&self, st: &mut State) -> Result<Option<Rc<core::Union>>, Error> {
+    fn to_core(&self, st: &mut State) -> Result<(Option<Rc<core::Union>>, core::Type), Error> {
         use parser::ast::union_dcl::*;
         match *self {
-            union_def(ref sd) => Ok(Some(sd.to_core(st)?)),
+            union_def(ref sd) => {
+                let (u, ty) = sd.to_core(st)?;
+                Ok((Some(u), ty))
+            }
             union_forward_dcl(ref id) => {
-                st.bind(id, ScopeEntry::FwdDecl)?;
-                Ok(None)
+                let mut path = st.current_scope.clone();
+                path.push(id.clone());
+                let ty = core::Type::Union(path);
+                st.bind(id, ScopeEntry::FwdDecl(ty.clone()))?;
+                Ok((None, ty))
             }
         }
     }
 }
 
 impl union_def {
-    fn to_core(&self, st: &mut State) -> Result<Rc<core::Union>, Error> {
+    fn to_core(&self, st: &mut State) -> Result<(Rc<core::Union>, core::Type), Error> {
         // save the original scope
         let original_scope = st.current_scope.clone();
 
@@ -353,7 +672,7 @@ impl union_def {
         // adjust the current scope before processing members
         st.current_scope = new_path.clone();
 
-        
+
         // restore the original scope and module depth
         st.current_scope = original_scope;
 
@@ -375,15 +694,15 @@ impl union_def {
             }
             variants.push((id, ty, labels));
         }
-        
+
         let u = core::Union {
             id: self.identifier.clone(),
             disc_ty: self.switch_type_spec.to_core(st)?,
             variants: variants,
         };
         let rc = Rc::new(u);
-        st.core_env.insert(new_path, core::Entry::Union(Rc::downgrade(&rc)));
-        Ok(rc)
+        st.core_env.insert(new_path.clone(), core::Entry::Union(Rc::downgrade(&rc)));
+        Ok((rc, core::Type::Union(new_path)))
     }
 }
 
@@ -398,7 +717,8 @@ impl switch_type_spec {
                 let entry = st.resolve_scoped_name(sn)?;
                 match entry {
                     ScopeEntry::EnumType(path) => Ok(core::Type::Enum(path.clone())),
-                    _ => Err(Error::InvalidType(sn.clone()))
+                    ScopeEntry::TypeDef(e@core::Type::Enum(_)) => Ok(e.clone()),
+                    _ => Err(Error::InvalidType("switch_type_spec", sn.clone()))
                 }
             },
         }
@@ -406,20 +726,26 @@ impl switch_type_spec {
 }
 
 impl struct_dcl {
-    fn to_core(&self, st: &mut State) -> Result<Option<Rc<core::Struct>>, Error> {
+    fn to_core(&self, st: &mut State) -> Result<(Option<Rc<core::Struct>>, core::Type), Error> {
         use parser::ast::struct_dcl::*;
         match *self {
-            struct_def(ref sd) => Ok(Some(sd.to_core(st)?)),
+            struct_def(ref sd) => {
+                let (s, ty) = sd.to_core(st)?;
+                Ok((Some(s), ty))
+            },
             struct_forward_dcl(ref id) => {
-                st.bind(id, ScopeEntry::FwdDecl)?;
-                Ok(None)
+                let mut path = st.current_scope.clone();
+                path.push(id.clone());
+                let ty = core::Type::Struct(path);
+                st.bind(id, ScopeEntry::FwdDecl(ty.clone()))?;
+                Ok((None, ty))
             }
         }
     }
 }
 
 impl struct_def {
-    fn to_core(&self, st: &mut State) -> Result<Rc<core::Struct>, Error> {
+    fn to_core(&self, st: &mut State) -> Result<(Rc<core::Struct>, core::Type), Error> {
         // save the original scope
         let original_scope = st.current_scope.clone();
 
@@ -428,6 +754,10 @@ impl struct_def {
         let mut new_path = st.current_scope.clone();
         new_path.push(self.identifier.clone());
         st.bind(&self.identifier, ScopeEntry::Child(new_path.clone(), ScopeType::Struct))?;
+
+        // create the inner scope
+        let new_scope = Scope::new();
+        st.scopes.insert(new_path.clone(), new_scope);
 
         // adjust the current scope before processing members
         st.current_scope = new_path.clone();
@@ -443,16 +773,16 @@ impl struct_def {
                 }
             }
         }
-        
+
         // restore the original scope and module depth
         st.current_scope = original_scope;
 
         let rc = Rc::new(core::Struct { id: self.identifier.clone(), members: members });
-        st.core_env.insert(new_path, core::Entry::Struct(Rc::downgrade(&rc)));
-        Ok(rc)
+        st.core_env.insert(new_path.clone(), core::Entry::Struct(Rc::downgrade(&rc)));
+        Ok((rc, core::Type::Struct(new_path)))
     }
 }
-      
+
 
 impl type_spec {
     fn to_core(&self, st: &mut State) -> Result<core::Type, Error> {
@@ -463,7 +793,7 @@ impl type_spec {
         }
     }
 }
-      
+
 impl simple_type_spec {
     fn to_core(&self, st: &mut State) -> Result<core::Type, Error> {
         use parser::ast::simple_type_spec::*;
@@ -491,7 +821,9 @@ impl simple_type_spec {
                     ScopeEntry::Relative(path, ScopeType::Struct) => Ok(core::Type::Struct(path.clone())),
                     ScopeEntry::Relative(path, ScopeType::Union) => Ok(core::Type::Union(path.clone())),
                     ScopeEntry::EnumType(path) => Ok(core::Type::Enum(path.clone())),
-                    _ => Err(Error::InvalidType(sn.clone()))
+                    ScopeEntry::TypeDef(ty) => Ok(ty.clone()),
+                    ScopeEntry::FwdDecl(ty) => Ok(ty.clone()),
+                    _ => panic!("{:?} = {:#?}", sn, entry) //Err(Error::InvalidType("simple_type_spec", sn.clone()))
                 }
             }
         }
@@ -528,7 +860,7 @@ impl declarator {
 }
 
 impl enum_dcl {
-    fn to_core(&self, st: &mut State) -> Result<Rc<core::Enum>, Error> {
+    fn to_core(&self, st: &mut State) -> Result<(Rc<core::Enum>, core::Type), Error> {
         let mut path = st.current_scope.clone();
         path.push(self.identifier.clone());
         st.bind(&self.identifier, ScopeEntry::EnumType(path.clone()))?;
@@ -540,11 +872,11 @@ impl enum_dcl {
             enumerators.push(enum_path);
         }
         let rc = Rc::new(core::Enum { id: self.identifier.clone(), enumerators: enumerators.clone() });
-        st.core_env.insert(path, core::Entry::Enum(Rc::downgrade(&rc)));
+        st.core_env.insert(path.clone(), core::Entry::Enum(Rc::downgrade(&rc)));
         for e in enumerators {
             st.core_env.insert(e, core::Entry::EnumVariant(Rc::downgrade(&rc)));
         }
-        Ok(rc)
+        Ok((rc, core::Type::Enum(path)))
     }
 }
 
@@ -635,7 +967,8 @@ impl const_type {
                 let entry = st.resolve_scoped_name(sn)?;
                 match entry {
                     ScopeEntry::EnumType(path) => Ok(core::Type::Enum(path.clone())),
-                    _ => Err(Error::InvalidType(sn.clone()))
+                    ScopeEntry::TypeDef(ty) => Ok(ty.clone()),
+                    _ => Err(Error::InvalidType("const_type", sn.clone()))
                 }
             },
             fixed_pt_const_type => Ok(core::Type::Fixed),
@@ -667,7 +1000,7 @@ impl const_expr {
                 let entry = st.resolve_scoped_name(sn)?;
                 match entry {
                     ScopeEntry::EnumVariant(path) => Ok(ConstExpr::Enum(path.clone())),
-                    _ => Err(Error::InvalidType(sn.clone()))
+                    _ => Err(Error::InvalidType("const_expr", sn.clone()))
                 }
             },
             literal(integer_literal(i)) => Ok(ConstExpr::Int(i)),
@@ -959,6 +1292,6 @@ impl const_expr {
             },
             _ => Err(Error::ConstTypeError("enum", self.clone()))
         }
-    }   
+    }
 }
 */
