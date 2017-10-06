@@ -1,8 +1,8 @@
 use std::char;
 use std::str::FromStr;
 
-use ast;
-use ast::*;
+use parser::ast;
+use parser::ast::*;
 
 /* Productions from IDL Building Blocks Core Data Types, Interfaces - Basic, and Anonymous Types */
 
@@ -82,7 +82,7 @@ pub boolean_literal -> literal
     / "FALSE" __ { literal::boolean_literal(false) }
 
 positive_int_const -> positive_int_const
-    = e:const_expr { ast::positive_int_const(e) }
+    = const_expr
 
 pub type_dcl -> type_dcl
     = ctd:constr_type_dcl { type_dcl::constr_type_dcl(ctd) }
@@ -251,8 +251,7 @@ any_declarators -> Vec<any_declarator>
     = any_declarator ++ ("," __)
 
 any_declarator -> any_declarator
-    = sd:simple_declarator { any_declarator::simple_declarator(sd) }
-    / ad:array_declarator { any_declarator::array_declarator(ad) }
+    = declarator
 
 declarators -> Vec<declarator>
     = declarator ++ ("," __)

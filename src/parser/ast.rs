@@ -116,8 +116,7 @@ pub enum literal {
     wide_string_literal(String),
 }
 
-#[derive(Debug, PartialEq)]
-pub struct positive_int_const(pub const_expr);
+pub type positive_int_const = const_expr;
 
 #[derive(Debug, PartialEq)]
 pub enum type_dcl {
@@ -268,11 +267,8 @@ pub enum typedef_dcl {
     constr_type_dcl(constr_type_dcl, Vec<any_declarator>),
 }
 
-#[derive(Debug, PartialEq)]
-pub enum any_declarator {
-    simple_declarator(simple_declarator),
-    array_declarator(array_declarator),
-}
+// these are the same with the anonymous type building block
+pub type any_declarator = declarator;
 
 #[derive(Debug, PartialEq)]
 pub enum declarator {
