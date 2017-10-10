@@ -82,10 +82,6 @@ enum ScopeType {
 }
 
 impl State {
-    fn get_current_scope(&self) -> &Scope {
-        self.scopes.get(&self.current_scope).expect("current scope exists")
-    }
-
     fn get_current_scope_mut(&mut self) -> &mut Scope {
         self.scopes.get_mut(&self.current_scope).expect("current scope exists")
     }
@@ -230,7 +226,7 @@ impl State {
     /// bring an identifier into scope as long as it doesn't clash,
     /// and return the Rust representation
     fn bind(&mut self, id: &identifier, entry: ScopeEntry) -> Result<(), Error> {
-        let mut cur = self.get_current_scope_mut();
+        let cur = self.get_current_scope_mut();
         // catch any clashes
         match cur.env.get(id) {
             None => (),
@@ -362,10 +358,7 @@ impl op_dcl {
             }
         };
 
-        let mut params = vec![];
-        for pd in self.parameter_dcls.iter() {
-            params.push(pd.to_core(st)?);
-        }
+        let params = self.parameter_dcls.iter().map(|pd| pd.to_core(st)).collect::<Result<Vec<core::Param>, Error>>()?;
 
         let raises;
         if let Some(ref res) = self.raises_expr {
@@ -404,7 +397,7 @@ impl raises_expr {
 }
 
 impl param_dcl {
-    fn to_core(&self, st: &mut State) -> Result<(core::Id, core::ParamDir, core::Type), Error> {
+    fn to_core(&self, st: &mut State) -> Result<core::Param, Error> {
         use parser::ast::param_attribute::*;
 
         let pd = match self.param_attribute {
@@ -415,7 +408,7 @@ impl param_dcl {
 
         let ty = self.type_spec.to_core(st)?;
 
-        Ok((self.simple_declarator.clone(), pd, ty))
+        Ok(core::Param { id: self.simple_declarator.clone(), dir: pd, ty: ty })
     }
 }
 

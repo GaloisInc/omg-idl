@@ -1,5 +1,6 @@
 use quote::{Ident, Tokens};
 use std::io::Write;
+use rustfmt;
 
 use core::ast::*;
 use core::error::Error;
@@ -21,14 +22,20 @@ impl<'a> State<'a> {
 pub fn emit_rust<W: Write>(spec: &Specification, env: &GlobalEnv, w: &mut W) -> Result<(), Error> {
     let st = State::new(env);
     let toks = spec.emit_rust(st)?;
-    write!(w, "{}", toks.as_str()).unwrap();
+    let rust_src = toks.into_string();
+    let mut cfg = rustfmt::config::Config::default();
+    cfg.set().write_mode(rustfmt::config::WriteMode::Display);
+    rustfmt::format_input(rustfmt::Input::Text(rust_src),
+                          &cfg,
+                          Some(w)).unwrap();
+    // println!("{}", rust_src);
     Ok(())
 }
 
 impl Specification {
     fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
-        let defs: Result<Vec<Tokens>, Error> = self.0.iter().map(|d| d.emit_rust(st)).collect();
-        Ok(quote!{#(#defs?)*})
+        let defs = self.0.iter().map(|d| d.emit_rust(st)).collect::<Result<Vec<Tokens>, Error>>()?;
+        Ok(quote!{#(#defs)*})
     }
 }
 
@@ -40,7 +47,7 @@ impl Definition {
             Const(ref c) => c.emit_rust(st),
             Struct(ref s) => s.emit_rust(st),
             Union(ref u) => u.emit_rust(st),
-            Enum(ref e) => e.emit_rust(st),
+            Enum(ref e) => e.emit_rust(),
             Native(_) => Ok(quote!{}),
             TypeDef(ref id, ref ty) => {
                 let id = id.emit_rust();
@@ -57,8 +64,14 @@ impl Module {
     fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
         let id = self.id.emit_rust();
         let st_nested = State { module_depth: st.module_depth + 1, .. st };
-        let defs: Result<Vec<Tokens>, Error> = self.defs.iter().map(|d| d.emit_rust(st_nested)).collect();
-        Ok(quote!{pub mod #id { #(#defs?)* }})
+        let defs = self.defs.iter().map(|d| d.emit_rust(st_nested)).collect::<Result<Vec<Tokens>, Error>>()?;
+        Ok(quote! {
+            #[allow(non_camel_case_types)]
+            #[allow(non_snake_case)]
+            pub mod #id {
+                #(#defs)*
+            }
+        })
     }
 }
 
@@ -97,8 +110,8 @@ impl ConstVal {
 impl Struct {
     fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
         let id = self.id.emit_rust();
-        let members: Result<Vec<Tokens>, Error> = self.members.iter().map(|m| m.emit_rust(st)).collect();
-        Ok(quote!{pub struct #id { #(#members?),* }})
+        let members = self.members.iter().map(|m| m.emit_rust(st)).collect::<Result<Vec<Tokens>, Error>>()?;
+        Ok(quote!{pub struct #id { #(#members),* }})
     }
 }
 
@@ -106,7 +119,7 @@ impl Member {
     fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
         let id = self.id.emit_rust();
         let ty = self.ty.emit_rust(st)?;
-        Ok(quote!{#id: #ty})
+        Ok(quote!{pub #id: #ty})
     }
 }
 
@@ -117,8 +130,10 @@ impl Union {
 }
 
 impl Enum {
-    fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
-        unimplemented!()
+    fn emit_rust(&self) -> Result<Tokens, Error> {
+        let id = self.id.emit_rust();
+        let enumerators: Vec<Tokens> = self.enumerators.iter().map(|e| e.last().expect("enumerators are named").emit_rust()).collect();
+        Ok(quote!{pub enum #id { #(#enumerators),* }})
     }
 }
 
@@ -130,7 +145,58 @@ impl Except {
 
 impl Interface {
     fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
-        unimplemented!()
+        let id = self.id.emit_rust();
+        let parents = self.parents.iter().map(|p| p.emit_rust(st)).collect::<Result<Vec<Tokens>, Error>>()?;
+        let ops = self.ops.iter().map(|op| op.emit_rust(st)).collect::<Result<Vec<Tokens>, Error>>()?;
+        let attrs = self.attrs.iter().map(|attr| attr.emit_rust(st)).collect::<Result<Vec<Tokens>, Error>>()?;
+        if parents.is_empty() {
+            Ok(quote!{pub trait #id { #(#ops)* #(#attrs)* }})
+        } else {
+            Ok(quote!{pub trait #id: #(#parents)+* { #(#ops)* #(#attrs)* }})
+        }
+    }
+}
+
+impl Op {
+    fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
+        if !self.raises.is_empty() {
+            unimplemented!()
+        }
+        let id = self.id.emit_rust();
+        let ret_ty = self.ret.emit_rust(st)?;
+        let ret = if self.ret == Type::Void { quote!{} } else { quote!{-> #ret_ty} };
+        let params = self.params.iter().map(|p| p.emit_rust(st)).collect::<Result<Vec<Tokens>, Error>>()?;
+        if params.is_empty() {
+            Ok(quote!{fn #id(&mut self) #ret;})
+        } else {
+            Ok(quote!{fn #id(&mut self, #(#params),*) #ret;})
+        }
+    }
+}
+
+impl Param {
+    fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
+        let id = self.id.emit_rust();
+        let dir = self.dir.emit_rust();
+        let ty = self.ty.emit_rust(st)?;
+        Ok(quote!{#id: #dir #ty})
+    }
+}
+
+impl ParamDir {
+    fn emit_rust(&self) -> Tokens {
+        match *self {
+            ParamDir::In => quote!{&},
+            ParamDir::Out => quote!{&mut},
+            ParamDir::InOut => quote!{&mut},
+        }
+    }
+}
+
+impl Attr {
+    fn emit_rust(&self, st: State) -> Result<Tokens, Error> {
+        // unimplemented!()
+        Ok(quote!{})
     }
 }
 
@@ -225,7 +291,18 @@ impl Type {
             Union(ref qn) => compound!(Union, qn),
             Enum(ref qn) => compound!(Enum, qn),
             Except(ref qn) => compound!(Except, qn),
-            Interface(ref qn) => compound!(Interface, qn),
+            Interface(ref qn) => {
+                use core::ast::Entry;
+                match st.env.get(qn) {
+                    Some(&Entry::Interface(_)) => (),
+                    Some(&Entry::TypeDef(Interface(_))) => (),
+                    Some(_) => panic!("type mismatch in global environment"),
+                    None => return Err(UnboundQName(qn.clone())),
+                }
+                let qn = qn.emit_rust(st)?;
+                // interfaces are trait objects, so we have to box them
+                Ok(quote!{Box<#qn>})
+            },
             Void => Ok(quote!{()}),
             Fixed => Err(Unsupported("fixed point")),
         }
@@ -249,6 +326,7 @@ impl QName {
             out.push_str("super::");
         }
         let mut qn = self.clone();
+        qn.reverse();
         out.push_str(qn.pop().expect("emitted QName must have at least one Id").as_str());
         while let Some(id) = qn.pop() {
             out.push_str("::");

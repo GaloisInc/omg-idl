@@ -9,6 +9,7 @@ peg = "0.5"
 
 [dependencies]
 quote = "0.3"
+rustfmt = "0.9"
 
 [[bin]]
 name = "compile_dds"

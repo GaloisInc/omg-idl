@@ -49,6 +49,13 @@ impl QName {
         self.0.pop()
     }
 
+    pub fn last(&self) -> Option<&Id> {
+        self.0.last()
+    }
+
+    pub fn reverse(&mut self) {
+        self.0.reverse();
+    }
 }
 
 pub type GlobalEnv = HashMap<QName, Entry>;
@@ -94,8 +101,15 @@ pub struct Interface {
 pub struct Op {
     pub id: Id,
     pub ret: Type,
-    pub params: Vec<(Id, ParamDir, Type)>,
+    pub params: Vec<Param>,
     pub raises: Vec<QName>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Param {
+    pub id: Id,
+    pub dir: ParamDir,
+    pub ty: Type,
 }
 
 #[derive(Debug, PartialEq)]
