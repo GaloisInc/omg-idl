@@ -3,11 +3,17 @@ use super::eval::ConstVal;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    ArraySizeTooLarge(u64),
-    ConstTypeMismatch(ConstType, ConstExpr),
-    IntegerOverflowed(IntType, ConstExpr),
-    InvalidArraySize(ConstVal),
+    ConstTypeMismatch(&'static str, AnyConst),
+    FloatOverflowed(FloatType, AnyConst),
+    IntegerOverflowed(&'static str, IntType, AnyConst),
+    InvalidSize(ConstVal),
     StringConstantTooLong(ConstType, String),
     UnboundQName(QName),
     Unsupported(&'static str),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AnyConst {
+    Expr(ConstExpr),
+    Val(ConstVal),
 }
