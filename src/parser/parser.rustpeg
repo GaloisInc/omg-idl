@@ -82,7 +82,7 @@ pub boolean_literal -> literal
     / "FALSE" __ { literal::boolean_literal(false) }
 
 positive_int_const -> positive_int_const
-    = const_expr
+    = e:const_expr { ast::positive_int_const(e) }
 
 pub type_dcl -> type_dcl
     = ctd:constr_type_dcl { type_dcl::constr_type_dcl(ctd) }
@@ -424,8 +424,8 @@ pub wide_character_literal -> literal
       }
 
 pub identifier -> identifier
-    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
-    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]*) __ { ast::identifier(id.to_owned()) }
+    = !keywordi id:$([a-zA-Z][a-zA-Z0-9_]*) __ { identifier::new(id) }
+    / !keywordi "_" id:$([a-zA-Z][a-zA-Z0-9_]*) __ { identifier::new(id) }
 
 character_literal_char -> char
     = !("'" / "\\" / eol_char) c:$latin1_char { c.chars().next().unwrap() }

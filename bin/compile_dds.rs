@@ -2,6 +2,7 @@ extern crate omg_idl;
 
 use std::io;
 
+use omg_idl::emit_rust;
 use omg_idl::core::from_parsed_ast;
 use omg_idl::parser;
 
@@ -19,6 +20,6 @@ const DDS_DCPS: &'static str = include_str!("dds_dcps.idl");
 
 fn main() {
     let spec = parser::specification(DDS_DCPS).unwrap();
-    let spec = from_parsed_ast::to_core(&spec).unwrap();
-    println!("{:#?}", spec);
+    let (spec, env) = from_parsed_ast::to_core(&spec).unwrap();
+    emit_rust::emit_rust(&spec, &env, &mut io::stdout()).unwrap();
 }

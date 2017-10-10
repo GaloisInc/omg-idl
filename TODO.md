@@ -7,6 +7,13 @@ the following IDL building blocks:
 - Interfaces — Basic (7.4.3)
 - Anonymous Types (7.4.14)
 
+## Interfaces - Full
+
+    This building block adds the possibility to embed inside an
+    interface declaration, declarations of types, constants and exceptions.
+
+Let's try to think of a clean mapping of this into Rust.
+
 # Technical Debt
 
 This project is aimed at a particular purpose: generating Rust

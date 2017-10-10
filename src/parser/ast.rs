@@ -1,23 +1,6 @@
-use std::hash::{Hash, Hasher};
+use core::ast::Id;
 
-#[derive(Clone, Debug)]
-pub struct identifier(pub String);
-
-impl Eq for identifier {}
-
-// per IDL spec, identifiers collide case-insensitively
-impl PartialEq for identifier {
-    fn eq(&self, other: &identifier) -> bool {
-        self.0.to_lowercase() == other.0.to_lowercase()
-    }
-}
-
-// per IDL spec, identifiers collide case-insensitively
-impl Hash for identifier {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_lowercase().hash(state);
-    }
-}
+pub type identifier = Id;
 
 #[derive(Debug, PartialEq)]
 pub struct specification(pub Vec<definition>);
@@ -116,7 +99,8 @@ pub enum literal {
     wide_string_literal(String),
 }
 
-pub type positive_int_const = const_expr;
+#[derive(Debug, PartialEq)]
+pub struct positive_int_const(pub const_expr);
 
 #[derive(Debug, PartialEq)]
 pub enum type_dcl {

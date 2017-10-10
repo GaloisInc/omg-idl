@@ -1,11 +1,55 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::{Rc, Weak};
 
-use parser::ast::identifier;
+#[derive(Clone, Debug)]
+pub struct Id(String);
 
-pub type Id = identifier;
+impl Id {
+    pub fn new(s: &str) -> Id {
+        Id(s.to_owned())
+    }
+}
 
-pub type QName = Vec<Id>;
+impl Eq for Id {}
+
+// per IDL spec, identifiers collide case-insensitively
+impl PartialEq for Id {
+    fn eq(&self, other: &Id) -> bool {
+        self.0.to_lowercase() == other.0.to_lowercase()
+    }
+}
+
+// per IDL spec, identifiers collide case-insensitively
+impl Hash for Id {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_lowercase().hash(state);
+    }
+}
+
+impl Id {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct QName(Vec<Id>);
+
+impl QName {
+    pub fn new() -> QName {
+        QName(vec![])
+    }
+
+    pub fn push(&mut self, id: &Id) {
+        self.0.push(id.clone());
+    }
+
+    pub fn pop(&mut self) -> Option<Id> {
+        self.0.pop()
+    }
+
+}
 
 pub type GlobalEnv = HashMap<QName, Entry>;
 
@@ -23,7 +67,7 @@ pub enum Entry {
     Interface(Weak<Interface>),
 }
 
-pub type Specification = Vec<Definition>;
+pub struct Specification(pub Vec<Definition>);
 
 #[derive(Debug, PartialEq)]
 pub enum Definition {
@@ -77,15 +121,21 @@ pub struct Module {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Member {
+    pub id: Id,
+    pub ty: Type,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Struct {
     pub id: Id,
-    pub members: Vec<(Id, Type)>,
+    pub members: Vec<Member>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Except {
     pub id: Id,
-    pub members: Vec<(Id, Type)>,
+    pub members: Vec<Member>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -110,12 +160,12 @@ pub struct Enum {
 #[derive(Debug, PartialEq)]
 pub struct Const {
     pub id: Id,
-    pub ty: Type,
+    pub ty: ConstType,
     pub expr: ConstExpr,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Type {
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum IntType {
     I16,
     I32,
     I64,
@@ -123,15 +173,41 @@ pub enum Type {
     U16,
     U32,
     U64,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum FloatType {
     F32,
     F64,
+    // unsupported
+    F128,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConstType {
+    Int(IntType),
+    Float(FloatType),
+    Char,
+    WChar,
+    Bool,
+    String(Bound),
+    WString(Bound),
+    Enum(QName),
+    // unsupported
+    Fixed,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Type {
+    Int(IntType),
+    Float(FloatType),
     Char,
     WChar,
     Bool,
     String(Bound),
     WString(Bound),
     Sequence(Box<Type>, Bound),
-    Array(Box<Type>, Vec<ConstExpr>),
+    Array(Box<Type>, Vec<PosIntConst>),
     Struct(QName),
     Union(QName),
     Enum(QName),
@@ -139,7 +215,6 @@ pub enum Type {
     Interface(QName),
     Void,
     // unsupported
-    F128,
     Fixed,
 }
 
@@ -153,38 +228,36 @@ impl Type {
             _ => false,
         }
     }
+
+    pub fn to_const_type(&self) -> Option<ConstType> {
+        use self::Type::*;
+        match *self {
+            Int(ity) => Some(ConstType::Int(ity)),
+            Float(fpty) => Some(ConstType::Float(fpty)),
+            Char => Some(ConstType::Char),
+            WChar => Some(ConstType::WChar),
+            Bool => Some(ConstType::Bool),
+            String(ref b) => Some(ConstType::String(b.clone())),
+            WString(ref b) => Some(ConstType::WString(b.clone())),
+            Enum(ref qn) => Some(ConstType::Enum(qn.clone())),
+            Fixed => Some(ConstType::Fixed),
+            _ => None
+        }
+    }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ConstVal {
-    Int(IntVal),
-    Float(FloatVal),
-    Char(char),
-    WChar(char),
-    Bool(bool),
-    String(String),
-    WString(String),
-    Enum(QName),
-}
+#[derive(Clone, Debug, PartialEq)]
+pub struct PosIntConst(ConstExpr);
 
-#[derive(Debug, PartialEq)]
-pub enum IntVal {
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-}
+impl PosIntConst {
+    pub fn new(e: ConstExpr) -> PosIntConst {
+        PosIntConst(e)
+    }
 
-#[derive(Debug, PartialEq)]
-pub enum FloatVal {
-    F32(f32),
-    F64(f64),
+    pub fn as_const_expr(&self) -> &ConstExpr {
+        &self.0
+    }
 }
-
-pub type PosIntConst = ConstExpr;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Bound {
@@ -203,6 +276,7 @@ pub enum ConstExpr {
     String(String),
     WString(String),
     Enum(QName),
+    // compound
     Or(Box<ConstExpr>, Box<ConstExpr>),
     Xor(Box<ConstExpr>, Box<ConstExpr>),
     And(Box<ConstExpr>, Box<ConstExpr>),
